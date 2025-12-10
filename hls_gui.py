@@ -185,14 +185,15 @@ class HLSUploaderGUI:
 
 # 上传函数：authcode 放在 Cookie
 def upload_file(file_path):
-    url = "https://img1.freeforever.club/upload?serverCompress=false&uploadChannel=telegram&uploadNameType=default&autoRetry=true&uploadFolder="
-    cookies = {"authcode": "97"}
+    url = "https://img1.freeforever.club/upload"
+
     params = {
         "serverCompress": "false",
         "uploadChannel": "telegram",
         "uploadNameType": "default",
         "autoRetry": "true",
-        "uploadFolder": ""
+        "uploadFolder": "",
+        "authcode": "97"
     }
     files = {
         "file": (os.path.basename(file_path), open(file_path, "rb"), "video/vnd.dlna.mpeg-tts")
