@@ -107,6 +107,8 @@ class VideoUploaderGUI:
         self.tree.column("path", width=520, anchor="w")
         self.tree.column("status", width=120, anchor="center")
         self.tree.pack(fill="both", expand=True)
+        self.tree.drop_target_register(DND_FILES)
+        self.tree.dnd_bind("<<Drop>>", self.on_drop)
 
         left_btns = ttk.Frame(left)
         left_btns.pack(fill="x", pady=8)
@@ -151,13 +153,11 @@ class VideoUploaderGUI:
         self.progress_label = ttk.Label(prog_frame, text="0%")
         self.progress_label.pack(side="left", padx=8)
 
-        # 日志区（支持拖拽）
+        # 日志区
         log_box = ttk.LabelFrame(root, text="运行日志", padding=8, style="Custom.TLabelframe")
         log_box.pack(fill="both", expand=True, padx=10, pady=(4, 6))
         self.log_text = tk.Text(log_box, height=10, wrap="none", font=("Consolas", 10), state="disabled")
         self.log_text.pack(fill="both", expand=True)
-        self.log_text.drop_target_register(DND_FILES)
-        self.log_text.dnd_bind("<<Drop>>", self.on_drop)
 
         self._schedule_log_drain()
 
