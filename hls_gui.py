@@ -11,6 +11,7 @@ import requests
 from tkinterdnd2 import DND_FILES, TkinterDnD
 
 OUTPUT_DIR = "output_slices"
+M3U8_DIR = "m3u8"
 DEFAULT_SEGMENT_SECONDS = 10
 DEFAULT_UPLOAD_THREADS = 5
 
@@ -51,21 +52,27 @@ def upload_file(file_path):
 
 def ensure_dirs():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
+    os.makedirs(M3U8_DIR, exist_ok=True)
 
 
 def shutdown_windows():
     if sys.platform.startswith("win"):
         os.system("shutdown /s /t 5")
+
+
 class VideoUploaderGUI:
     def __init__(self, root):
         self.root = root
+        self.center_window(980, 700)
         self.root.title("批量视频切片上传工具")
-        self.root.geometry("980x700")
 
         ensure_dirs()
 
         style = ttk.Style()
-        style.theme_use("clam")
+        try:
+            style.theme_use("clam")
+        except tk.TclError:
+            pass
         style.configure("TButton", font=("Microsoft YaHei", 11), padding=6)
         style.configure("TLabel", font=("Microsoft YaHei", 11))
         style.configure("TEntry", font=("Microsoft YaHei", 11))
@@ -154,13 +161,14 @@ class VideoUploaderGUI:
 
         self._schedule_log_drain()
 
-        # 上传结果区
-        result_box = ttk.LabelFrame(root, text="上传结果", padding=8, style="Custom.TLabelframe")
-        result_box.pack(fill="x", padx=10, pady=(0, 10))
-        self.result_text = tk.Text(result_box, height=6, wrap="word", font=("Consolas", 10), state="disabled")
-        self.result_text.pack(fill="x")
-
-    # 日志与异步刷新
+    # 居中窗口
+    def center_window(self, width, height):
+        screen_width = self.root.winfo_screenwidth()
+        screen_height = self.root.winfo_screenheight()
+        x = (screen_width - width) // 2
+        y = (screen_height - height) // 2
+        self.root.geometry(f"{width}x{height}+{x}+{y}")
+    # 日志
     def log(self, msg):
         t = time.strftime("%H:%M:%S")
         self.log_q.put(f"[{t}] {msg}")
@@ -173,12 +181,6 @@ class VideoUploaderGUI:
             self.log_text.see("end")
             self.log_text.config(state="disabled")
         self.root.after(120, self._schedule_log_drain)
-
-    def append_result(self, msg):
-        self.result_text.config(state="normal")
-        self.result_text.insert("end", msg + "\n")
-        self.result_text.see("end")
-        self.result_text.config(state="disabled")
 
     # 拖拽事件：支持文件与文件夹
     def on_drop(self, event):
@@ -193,14 +195,11 @@ class VideoUploaderGUI:
             else:
                 if p.lower().endswith(VIDEO_EXTS):
                     new_files.append(p)
-
-        # 按文件名升序
+        # 文件名升序
         new_files.sort(key=lambda x: os.path.basename(x).lower())
-
         # 追加并去重
         self.files.extend(new_files)
         self.files = list(dict.fromkeys(self.files))
-
         self.refresh_table()
         self.log(f"拖拽添加 {len(new_files)} 个文件")
 
@@ -214,7 +213,7 @@ class VideoUploaderGUI:
             for fn in filenames:
                 if fn.lower().endswith(VIDEO_EXTS):
                     self.files.append(os.path.join(rootdir, fn))
-        # 按文件名升序
+        # 文件名升序
         self.files.sort(key=lambda x: os.path.basename(x).lower())
         self.refresh_table()
         self.log(f"已添加 {len(self.files)} 个视频文件")
@@ -295,17 +294,18 @@ class VideoUploaderGUI:
             self.is_running = False
             self.root.after(0, lambda: (self.start_btn.state(["!disabled"]), self.stop_btn.state(["disabled"])))
 
-    # 单视频：切片 -> 上传TS（实时状态） -> 重写本地 m3u8
+    # 单视频：切片 -> 上传TS（实时状态） -> 重写 m3u8 到 M3U8_DIR
     def _process_single_video(self, input_file, base, segment_seconds, upload_threads):
         # 子文件夹：output_slices/<视频名>/
         video_dir = os.path.join(OUTPUT_DIR, base)
         os.makedirs(video_dir, exist_ok=True)
 
-        # m3u8 文件为视频名；TS 命名 %03d.ts
-        playlist_path = os.path.join(video_dir, f"{base}.m3u8")
+        # m3u8 文件统一放到 M3U8_DIR；TS 命名 %03d.ts
+        playlist_path = os.path.join(M3U8_DIR, f"{base}.m3u8")
         ts_pattern = os.path.join(video_dir, "%03d.ts")
 
-        # 切片
+        # 切片（生成 TS 和一个原始 m3u8 临时文件在视频目录中）
+        tmp_playlist = os.path.join(video_dir, f"{base}.m3u8")
         ffmpeg_cmd = [
             "ffmpeg", "-y",
             "-i", input_file,
@@ -313,7 +313,7 @@ class VideoUploaderGUI:
             "-map", "0",
             "-f", "segment",
             "-segment_time", str(segment_seconds),
-            "-segment_list", playlist_path,
+            "-segment_list", tmp_playlist,
             ts_pattern
         ]
         self.log(f"开始切片：{input_file}")
@@ -341,7 +341,7 @@ class VideoUploaderGUI:
         urls = {}
         uploaded_count = 0
 
-        def on_piece_uploaded(fp_local):
+        def on_piece_uploaded():
             nonlocal uploaded_count, total_ts
             uploaded_count += 1
             percent = uploaded_count / total_ts
@@ -356,19 +356,19 @@ class VideoUploaderGUI:
                     url = fut.result()
                     urls[fname] = url
                     self.log(f"上传成功：{fname} -> {url}")
-                    self.root.after(0, lambda f=fname: on_piece_uploaded(f))
+                    self.root.after(0, on_piece_uploaded)
                 except Exception as e:
                     self.log(f"上传失败：{fname} -> {e}")
                     self._cleanup_video_files(video_dir)
                     messagebox.showerror("错误", f"切片上传失败：{fname}\n已清理该视频的切片和 m3u8。")
                     return False
 
-        # 重写 m3u8：把 TS 文件名替换为对应的 URL（本地保存）
+        # 重写 m3u8：把 TS 文件名替换为对应的 URL，并输出到 M3U8_DIR/base.m3u8
         try:
-            with open(playlist_path, "r", encoding="utf-8") as f:
+            with open(tmp_playlist, "r", encoding="utf-8") as f:
                 lines = f.readlines()
         except Exception as e:
-            self.log(f"读取 m3u8 失败：{e}")
+            self.log(f"读取临时 m3u8 失败：{e}")
             messagebox.showerror("错误", f"读取 m3u8 失败：{e}")
             self._cleanup_video_files(video_dir)
             return False
@@ -391,15 +391,20 @@ class VideoUploaderGUI:
             return False
 
         self.log(f"生成 m3u8：{playlist_path}")
-        self.append_result(f"{os.path.basename(input_file)} -> m3u8 本地生成成功")
 
-        # 完成后是否删除 TS
+        # 完成后是否删除 TS 与临时 m3u8
         if self.after_delete_var.get():
             for f in ts_files:
                 try:
                     os.remove(os.path.join(video_dir, f))
                 except Exception:
                     pass
+            # 删除临时 m3u8
+            try:
+                if os.path.exists(tmp_playlist):
+                    os.remove(tmp_playlist)
+            except Exception:
+                pass
             self.log(f"已删除 TS 切片：{base}")
 
         return True
@@ -425,11 +430,17 @@ class VideoUploaderGUI:
             except Exception:
                 pass
         try:
+            tmp_m3u8 = os.path.join(video_dir, os.path.basename(video_dir) + ".m3u8")
+            if os.path.exists(tmp_m3u8):
+                os.remove(tmp_m3u8)
+        except Exception:
+            pass
+        try:
             if not os.listdir(video_dir):
                 os.rmdir(video_dir)
         except Exception:
             pass
-        self.log("已清理切片与 m3u8")
+        self.log("已清理切片与临时 m3u8")
 
     # 表格状态更新
     def _set_row_status(self, file_path, status):
@@ -438,18 +449,17 @@ class VideoUploaderGUI:
             if vals and vals[1] == file_path:
                 self.tree.item(iid, values=(vals[0], vals[1], status))
                 break
-# =========================
+
+
 # 入口
-# =========================
 def main():
     try:
-        import requests  # 确保 requests 已安装
+        import requests  # noqa
     except Exception:
         messagebox.showerror("错误", "缺少 requests 依赖，请先安装：pip install requests")
         return
 
-    # 使用 TkinterDnD 支持拖拽
-    root = TkinterDnD.Tk()
+    root = TkinterDnD.Tk()  # 使用支持拖拽的 Tk
     app = VideoUploaderGUI(root)
     root.mainloop()
 
