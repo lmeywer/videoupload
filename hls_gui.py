@@ -31,17 +31,45 @@ VIDEO_EXTS = (".mp4", ".mov", ".avi", ".mkv")
 
 
 def upload_file(file_path):
-    """上传文件：带 Cookie + 完整 URL 参数"""
-    cookies = {"authcode": COOKIE_AUTHCODE}
+    # 拼接完整 URL（带参数）
+    url = (
+        "https://img1.freeforever.club/upload"
+        "?serverCompress=false"
+        "&uploadChannel=telegram"
+        "&uploadNameType=default"
+        "&autoRetry=true"
+        "&uploadFolder="
+    )
+
+    # 设置请求头（authcode 放在 Header 和 Cookie）
+    headers = {
+        "authcode": "97",  # 放在 Header
+        "Accept": "application/json, text/plain, */*",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
+        "Origin": "https://img1.freeforever.club",
+        "Referer": "https://img1.freeforever.club/",
+    }
+
+    cookies = {
+        "authCode": "97"  # 放在 Cookie
+    }
+
+    # 只允许上传 ts 文件
     ext = os.path.splitext(file_path)[1].lower()
-    ctype = "video/vnd.dlna.mpeg-tts" if ext == ".ts" else "application/vnd.apple.mpegurl"
+    if ext != ".ts":
+        raise ValueError("只允许上传 .ts 文件")
+
     with open(file_path, "rb") as f:
-        files = {"file": (os.path.basename(file_path), f, ctype)}
-        resp = requests.post(UPLOAD_URL, params=UPLOAD_PARAMS, files=files, cookies=cookies, timeout=120)
-    resp.raise_for_status()
-    data = resp.json()
-    src = data[0]["src"]
-    return "https://img1.freeforever.club" + src
+        files = {
+            "file": (os.path.basename(file_path), f, "video/vnd.dlna.mpeg-tts")
+        }
+        response = requests.post(url, headers=headers, cookies=cookies, files=files)
+        response.raise_for_status()
+        data = response.json()
+        src = data[0]["src"]
+        return "https://img1.freeforever.club" + src
+
 
 
 def ensure_dirs():
