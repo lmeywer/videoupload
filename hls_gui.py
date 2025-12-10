@@ -12,69 +12,56 @@ import requests
 # =========================
 # 配置
 # =========================
-OUTPUT_DIR = "output_slices"
-M3U8_DIR = "m3u8"
+OUTPUT_DIR = "output_slices"  # 每个视频独立子目录：output_slices/<视频名>/
 DEFAULT_SEGMENT_SECONDS = 10
 DEFAULT_UPLOAD_THREADS = 5
 
-UPLOAD_URL = "https://img1.freeforever.club/upload"
-UPLOAD_PARAMS = {
-    "serverCompress": "false",
-    "uploadChannel": "telegram",
-    "uploadNameType": "default",
-    "autoRetry": "true",
-    "uploadFolder": ""
-}
-COOKIE_AUTHCODE = "97"  # 请替换为你的有效 authcode
+# 仅上传 TS 接口（参数拼在 URL 上）
+UPLOAD_URL = (
+    "https://img1.freeforever.club/upload"
+    "?serverCompress=false"
+    "&uploadChannel=telegram"
+    "&uploadNameType=default"
+    "&autoRetry=true"
+    "&uploadFolder="
+)
+AUTHCODE = "97"  # 请替换为有效值
 
 VIDEO_EXTS = (".mp4", ".mov", ".avi", ".mkv")
 
 
+# =========================
+# 上传函数（只允许 TS）
+# =========================
 def upload_file(file_path):
-    # 拼接完整 URL（带参数）
-    url = (
-        "https://img1.freeforever.club/upload"
-        "?serverCompress=false"
-        "&uploadChannel=telegram"
-        "&uploadNameType=default"
-        "&autoRetry=true"
-        "&uploadFolder="
-    )
-
-    # 设置请求头（authcode 放在 Header 和 Cookie）
     headers = {
-        "authcode": "97",  # 放在 Header
+        "authcode": AUTHCODE,
         "Accept": "application/json, text/plain, */*",
         "Cache-Control": "no-cache",
         "Pragma": "no-cache",
         "Origin": "https://img1.freeforever.club",
         "Referer": "https://img1.freeforever.club/",
     }
+    cookies = {"authCode": AUTHCODE}
 
-    cookies = {
-        "authCode": "97"  # 放在 Cookie
-    }
-
-    # 只允许上传 ts 文件
     ext = os.path.splitext(file_path)[1].lower()
     if ext != ".ts":
         raise ValueError("只允许上传 .ts 文件")
 
     with open(file_path, "rb") as f:
-        files = {
-            "file": (os.path.basename(file_path), f, "video/vnd.dlna.mpeg-tts")
-        }
-        response = requests.post(url, headers=headers, cookies=cookies, files=files)
-        response.raise_for_status()
-        data = response.json()
-        src = data[0]["src"]
-        return "https://img1.freeforever.club" + src
+        files = {"file": (os.path.basename(file_path), f, "video/vnd.dlna.mpeg-tts")}
+        resp = requests.post(UPLOAD_URL, headers=headers, cookies=cookies, files=files, timeout=180)
+    resp.raise_for_status()
+    data = resp.json()
+    src = data[0]["src"]
+    return "https://img1.freeforever.club" + src
 
 
-
+# =========================
+# 工具
+# =========================
 def ensure_dirs():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    os.makedirs(M3U8_DIR, exist_ok=True)
 
 
 def shutdown_windows():
@@ -82,6 +69,9 @@ def shutdown_windows():
         os.system("shutdown /s /t 5")
 
 
+# =========================
+# GUI
+# =========================
 class VideoUploaderGUI:
     def __init__(self, root):
         self.root = root
@@ -90,7 +80,7 @@ class VideoUploaderGUI:
 
         ensure_dirs()
 
-        # 样式（自定义边框颜色与浅灰背景）
+        # 样式：白底蓝条进度、蓝色边框
         style = ttk.Style()
         try:
             style.theme_use("clam")
@@ -99,10 +89,16 @@ class VideoUploaderGUI:
         style.configure("TButton", font=("Microsoft YaHei", 11), padding=6)
         style.configure("TLabel", font=("Microsoft YaHei", 11))
         style.configure("TEntry", font=("Microsoft YaHei", 11))
-        style.configure("Horizontal.TProgressbar", thickness=18)
-        style.configure("Custom.TLabelframe", background="#f8f8f8", bordercolor="#3399cc")
-        style.configure("Custom.TLabelframe.Label", background="#f8f8f8", foreground="#333")
+        style.configure("Custom.Horizontal.TProgressbar",
+                        troughcolor="white",
+                        background="#3399ff",
+                        bordercolor="#3399ff",
+                        lightcolor="#3399ff",
+                        darkcolor="#3399ff")
+        style.configure("Custom.TLabelframe", bordercolor="#3399ff")
+        style.configure("Custom.TLabelframe.Label", foreground="#3399ff")
 
+        # 状态
         self.files = []
         self.log_q = queue.Queue()
         self.is_running = False
@@ -111,11 +107,11 @@ class VideoUploaderGUI:
         header = ttk.Label(root, text="批量视频切片上传工具", font=("Microsoft YaHei", 16, "bold"))
         header.pack(pady=10)
 
-        # 主区域：左侧文件表格，右侧参数与控制
+        # 主区域：左侧表格，右侧参数+控制+进度
         main = ttk.Frame(root, padding=10)
         main.pack(fill="both", expand=True)
 
-        # 左侧：视频列表 + 按钮
+        # 左侧：文件表格
         left = ttk.Frame(main)
         left.pack(side="left", fill="both", expand=True, padx=(0, 10))
 
@@ -135,13 +131,12 @@ class VideoUploaderGUI:
         ttk.Button(left_btns, text="清空数据", command=self.clear_data).pack(side="left", padx=8)
         ttk.Button(left_btns, text="退出程序", command=self.exit_app).pack(side="right")
 
-        # 右侧：参数设置 + 控制按钮 + 进度条
+        # 右侧：参数、控制、进度
         right = ttk.Frame(main)
         right.pack(side="right", fill="y")
 
         param_frame = ttk.LabelFrame(right, text="参数设置", style="Custom.TLabelframe")
         param_frame.pack(fill="x", pady=8)
-
         ttk.Label(param_frame, text="切片间隔(秒):").grid(row=0, column=0, sticky="w", padx=6, pady=6)
         self.seg_entry = ttk.Entry(param_frame, width=8)
         self.seg_entry.insert(0, str(DEFAULT_SEGMENT_SECONDS))
@@ -159,14 +154,19 @@ class VideoUploaderGUI:
 
         ctrl_frame = ttk.Frame(right)
         ctrl_frame.pack(fill="x", pady=12)
-        self.start_btn = ttk.Button(ctrl_frame, text="开始上传", command=self.start_process)
+        self.start_btn = ttk.Button(ctrl_frame, text="开始处理", command=self.start_process)
         self.start_btn.pack(side="left", padx=6)
         self.stop_btn = ttk.Button(ctrl_frame, text="停止", command=self.stop_process)
         self.stop_btn.pack(side="left", padx=6)
         self.stop_btn.state(["disabled"])
 
-        self.progress = ttk.Progressbar(right, orient="horizontal", mode="determinate", length=320)
-        self.progress.pack(fill="x", pady=10)
+        prog_frame = ttk.Frame(right)
+        prog_frame.pack(fill="x", pady=10)
+        self.progress = ttk.Progressbar(prog_frame, orient="horizontal", mode="determinate",
+                                        length=320, style="Custom.Horizontal.TProgressbar")
+        self.progress.pack(side="left")
+        self.progress_label = ttk.Label(prog_frame, text="0%")
+        self.progress_label.pack(side="left", padx=8)
 
         # 日志区
         log_box = ttk.LabelFrame(root, text="运行日志", padding=8, style="Custom.TLabelframe")
@@ -227,7 +227,7 @@ class VideoUploaderGUI:
             self.tree.delete(item)
         for fp in self.files:
             name = os.path.basename(fp)
-            self.tree.insert("", "end", values=(name, fp, "待处理"))
+            self.tree.insert("", "end", values=(name, fp, "未处理"))
 
     def clear_data(self):
         self.files = []
@@ -261,8 +261,11 @@ class VideoUploaderGUI:
         self.is_running = True
         self.start_btn.state(["disabled"])
         self.stop_btn.state(["!disabled"])
-        self.progress["value"] = 0
-        self.progress["maximum"] = len(self.files)
+
+        # 比例进度（0~1）
+        self.progress["maximum"] = 1.0
+        self.progress["value"] = 0.0
+        self.progress_label.config(text="0%")
 
         t = threading.Thread(target=self._process_thread, args=(seg, thr), daemon=True)
         t.start()
@@ -271,19 +274,25 @@ class VideoUploaderGUI:
         messagebox.showinfo("提示", "当前不支持强制中断 ffmpeg/上传，请等待当前视频完成。")
 
     # -------------------
-    # 后台线程：处理所有视频
+    # 后台线程：逐视频切片后再上传
     # -------------------
     def _process_thread(self, segment_seconds, upload_threads):
+        total = len(self.files)
+        completed = 0
         try:
-            for idx, fp in enumerate(self.files, start=1):
+            for fp in self.files:
                 base = os.path.splitext(os.path.basename(fp))[0]
                 self._set_row_status(fp, "切片中")
                 ok = self._process_single_video(fp, base, segment_seconds, upload_threads)
                 if not ok:
                     self._set_row_status(fp, "失败")
                     break
-                self._set_row_status(fp, "完成")
-                self.root.after(0, lambda v=idx: self.progress.configure(value=v))
+                self._set_row_status(fp, "上传完成")
+                completed += 1
+                ratio = completed / total
+                # 更新比例进度条与文本
+                self.root.after(0, lambda r=ratio: (self.progress.configure(value=r),
+                                                    self.progress_label.config(text=f"{r:.0%}")))
             else:
                 self.log("全部视频处理完成")
                 messagebox.showinfo("完成", "全部视频已上传完成！")
@@ -294,14 +303,18 @@ class VideoUploaderGUI:
             self.root.after(0, lambda: (self.start_btn.state(["!disabled"]), self.stop_btn.state(["disabled"])))
 
     # -------------------
-    # 单视频处理流程
+    # 单视频处理：切片 -> 上传TS并实时状态 -> 重写m3u8（本地）
     # -------------------
     def _process_single_video(self, input_file, base, segment_seconds, upload_threads):
-        ensure_dirs()
+        # 子文件夹：output_slices/<视频名>/
+        video_dir = os.path.join(OUTPUT_DIR, base)
+        os.makedirs(video_dir, exist_ok=True)
 
-        playlist_path = os.path.join(OUTPUT_DIR, f"{base}_playlist.m3u8")
-        ts_pattern = os.path.join(OUTPUT_DIR, f"{base}_%03d.ts")
+        # m3u8 文件名为视频名；TS 命名 %03d.ts
+        playlist_path = os.path.join(video_dir, f"{base}.m3u8")
+        ts_pattern = os.path.join(video_dir, "%03d.ts")
 
+        # 切片
         ffmpeg_cmd = [
             "ffmpeg", "-y",
             "-i", input_file,
@@ -312,7 +325,6 @@ class VideoUploaderGUI:
             "-segment_list", playlist_path,
             ts_pattern
         ]
-
         self.log(f"开始切片：{input_file}")
         try:
             subprocess.run(ffmpeg_cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -326,33 +338,48 @@ class VideoUploaderGUI:
             return False
         self.log(f"切片完成：{input_file}")
 
-        ts_files = sorted([f for f in os.listdir(OUTPUT_DIR) if f.startswith(base + "_") and f.endswith(".ts")])
+        # 当前视频的全部 TS
+        ts_files = sorted([f for f in os.listdir(video_dir) if f.endswith(".ts")])
+        total_ts = len(ts_files)
+        if total_ts == 0:
+            self.log("未生成 TS 切片")
+            messagebox.showerror("错误", "未生成 TS 切片")
+            return False
 
-        # 并发上传切片
-        self._set_row_status(input_file, "上传切片")
+        # 并发上传 TS，实时更新“已上传 xx%”
         urls = {}
+        uploaded_count = 0
+
+        def on_piece_uploaded():
+            nonlocal uploaded_count, total_ts
+            uploaded_count += 1
+            percent = uploaded_count / total_ts
+            self._set_row_status(input_file, f"已上传 {percent:.0%}")
+
+        self._set_row_status(input_file, "已上传 0%")
         with ThreadPoolExecutor(max_workers=upload_threads) as ex:
-            futures = {ex.submit(self._upload_with_retry, os.path.join(OUTPUT_DIR, fname)): fname for fname in ts_files}
+            futures = {ex.submit(self._upload_with_retry, os.path.join(video_dir, fname)): fname for fname in ts_files}
             for fut in as_completed(futures):
                 fname = futures[fut]
                 try:
                     url = fut.result()
                     urls[fname] = url
                     self.log(f"上传成功：{fname} -> {url}")
+                    self.root.after(0, on_piece_uploaded)
                 except Exception as e:
                     self.log(f"上传失败：{fname} -> {e}")
-                    self._cleanup_video_files(ts_files, playlist_path)
-                    messagebox.showerror("错误", f"切片上传失败：{fname}\n已清理该视频的切片和临时 m3u8。")
+                    self._cleanup_video_files(video_dir)
+                    messagebox.showerror("错误", f"切片上传失败：{fname}\n已清理该视频的切片和 m3u8。")
                     return False
 
-        # 重写 m3u8 到 m3u8/ 目录
+        # 重写 m3u8：把 TS 文件名替换为对应的 URL（本地保存）
         try:
             with open(playlist_path, "r", encoding="utf-8") as f:
                 lines = f.readlines()
         except Exception as e:
             self.log(f"读取 m3u8 失败：{e}")
             messagebox.showerror("错误", f"读取 m3u8 失败：{e}")
-            self._cleanup_video_files(ts_files, playlist_path)
+            self._cleanup_video_files(video_dir)
             return False
 
         new_lines = []
@@ -363,34 +390,27 @@ class VideoUploaderGUI:
             else:
                 new_lines.append(line)
 
-        final_m3u8 = os.path.join(M3U8_DIR, f"final_{base}.m3u8")
         try:
-            with open(final_m3u8, "w", encoding="utf-8") as f:
+            with open(playlist_path, "w", encoding="utf-8") as f:
                 f.writelines(new_lines)
         except Exception as e:
-            self.log(f"写入最终 m3u8 失败：{e}")
-            messagebox.showerror("错误", f"写入最终 m3u8 失败：{e}")
-            self._cleanup_video_files(ts_files, playlist_path)
+            self.log(f"写入 m3u8 失败：{e}")
+            messagebox.showerror("错误", f"写入 m3u8 失败：{e}")
+            self._cleanup_video_files(video_dir)
             return False
 
-        self.log(f"生成最终 m3u8：{final_m3u8}")
+        self.log(f"生成 m3u8：{playlist_path}")
+        self.append_result(f"{os.path.basename(input_file)} -> m3u8 本地生成成功")
 
-        # 上传最终 m3u8
-        self._set_row_status(input_file, "上传 m3u8")
-        try:
-            m3u8_url = upload_file(final_m3u8)
-            self.log(f"m3u8 上传成功：{m3u8_url}")
-            self.append_result(f"{os.path.basename(input_file)} -> {m3u8_url}")
-        except Exception as e:
-            self.log(f"m3u8 上传失败：{e}")
-            messagebox.showerror("错误", f"m3u8 上传失败：{e}")
-            self._cleanup_video_files(ts_files, playlist_path)
-            return False
-
-        # 完成后删除切片
+        # 完成后是否删除切片
         if self.after_delete_var.get():
-            self._cleanup_video_files(ts_files, playlist_path, silent=True)
-            self.log(f"已删除切片与临时 m3u8：{base}")
+            # 保留 m3u8，删除 TS
+            for f in ts_files:
+                try:
+                    os.remove(os.path.join(video_dir, f))
+                except Exception:
+                    pass
+            self.log(f"已删除 TS 切片：{base}")
 
         return True
 
@@ -399,7 +419,7 @@ class VideoUploaderGUI:
     # -------------------
     def _upload_with_retry(self, file_path, max_attempts=2):
         last_err = None
-        for i in range(max_attempts):
+        for _ in range(max_attempts):
             try:
                 return upload_file(file_path)
             except Exception as e:
@@ -408,20 +428,23 @@ class VideoUploaderGUI:
         raise last_err
 
     # -------------------
-    # 清理文件
+    # 清理文件（该视频目录）
     # -------------------
-    def _cleanup_video_files(self, ts_files, playlist_path, silent=False):
-        for f in ts_files:
+    def _cleanup_video_files(self, video_dir, keep_m3u8=False):
+        for fn in os.listdir(video_dir):
+            if keep_m3u8 and fn.endswith(".m3u8"):
+                continue
             try:
-                os.remove(os.path.join(OUTPUT_DIR, f))
+                os.remove(os.path.join(video_dir, fn))
             except Exception:
                 pass
+        # 若目录空则尝试移除
         try:
-            os.remove(playlist_path)
+            if not os.listdir(video_dir):
+                os.rmdir(video_dir)
         except Exception:
             pass
-        if not silent:
-            self.log("已清理切片与临时 m3u8")
+        self.log("已清理切片与 m3u8")
 
     # -------------------
     # 表格状态更新
