@@ -185,7 +185,7 @@ class HLSUploaderGUI:
 
 # 上传函数：authcode 放在 Cookie
 def upload_file(file_path):
-    url = "https://img1.freeforever.club/upload"
+    url = "https://img1.freeforever.club/upload?serverCompress=false&uploadChannel=telegram&uploadNameType=default&autoRetry=true&uploadFolder="
     cookies = {"authcode": "97"}
     params = {
         "serverCompress": "false",
