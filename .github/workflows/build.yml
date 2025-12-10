@@ -1,0 +1,32 @@
+name: Build EXE
+
+on:
+  workflow_dispatch:   # 手动触发
+  push:
+    branches: [ "main" ]   # 或者你自己的分支
+
+jobs:
+  build:
+    runs-on: windows-latest   # 使用 Windows 环境
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: |
+          pip install requests pyinstaller
+
+      - name: Build exe
+        run: |
+          pyinstaller --onefile --windowed hls_gui.py
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: hls_gui_exe
+          path: dist/hls_gui.exe
