@@ -30,10 +30,8 @@ COOKIE_AUTHCODE = "97"  # 请替换为你的有效 authcode
 VIDEO_EXTS = (".mp4", ".mov", ".avi", ".mkv")
 
 
-# =========================
-# 上传函数（带 Cookie + 完整 URL 参数）
-# =========================
 def upload_file(file_path):
+    """上传文件：带 Cookie + 完整 URL 参数"""
     cookies = {"authcode": COOKIE_AUTHCODE}
     ext = os.path.splitext(file_path)[1].lower()
     ctype = "video/vnd.dlna.mpeg-tts" if ext == ".ts" else "application/vnd.apple.mpegurl"
@@ -46,9 +44,6 @@ def upload_file(file_path):
     return "https://img1.freeforever.club" + src
 
 
-# =========================
-# 工具函数
-# =========================
 def ensure_dirs():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     os.makedirs(M3U8_DIR, exist_ok=True)
@@ -59,17 +54,15 @@ def shutdown_windows():
         os.system("shutdown /s /t 5")
 
 
-# =========================
-# 主应用
-# =========================
 class VideoUploaderGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("批量视频切片上传工具")
-        self.root.geometry("900x620")
+        self.root.geometry("980x700")
 
         ensure_dirs()
 
+        # 样式（自定义边框颜色与浅灰背景）
         style = ttk.Style()
         try:
             style.theme_use("clam")
@@ -79,6 +72,8 @@ class VideoUploaderGUI:
         style.configure("TLabel", font=("Microsoft YaHei", 11))
         style.configure("TEntry", font=("Microsoft YaHei", 11))
         style.configure("Horizontal.TProgressbar", thickness=18)
+        style.configure("Custom.TLabelframe", background="#f8f8f8", bordercolor="#3399cc")
+        style.configure("Custom.TLabelframe.Label", background="#f8f8f8", foreground="#333")
 
         self.files = []
         self.log_q = queue.Queue()
@@ -88,58 +83,66 @@ class VideoUploaderGUI:
         header = ttk.Label(root, text="批量视频切片上传工具", font=("Microsoft YaHei", 16, "bold"))
         header.pack(pady=10)
 
-        # 视频列表
+        # 主区域：左侧文件表格，右侧参数与控制
+        main = ttk.Frame(root, padding=10)
+        main.pack(fill="both", expand=True)
+
+        # 左侧：视频列表 + 按钮
+        left = ttk.Frame(main)
+        left.pack(side="left", fill="both", expand=True, padx=(0, 10))
+
         columns = ("name", "path", "status")
-        self.tree = ttk.Treeview(root, columns=columns, show="headings", height=10)
+        self.tree = ttk.Treeview(left, columns=columns, show="headings", height=16)
         self.tree.heading("name", text="文件名")
         self.tree.heading("path", text="路径")
         self.tree.heading("status", text="状态")
         self.tree.column("name", width=220, anchor="w")
         self.tree.column("path", width=520, anchor="w")
-        self.tree.column("status", width=100, anchor="center")
-        self.tree.pack(fill="x", padx=10, pady=5)
+        self.tree.column("status", width=120, anchor="center")
+        self.tree.pack(fill="both", expand=True)
 
-        # 操作按钮
-        btn_frame = ttk.Frame(root)
-        btn_frame.pack(fill="x", pady=5)
-        ttk.Button(btn_frame, text="选择目录", command=self.choose_dir).pack(side="left")
-        ttk.Button(btn_frame, text="清空数据", command=self.clear_data).pack(side="left", padx=8)
-        ttk.Button(btn_frame, text="退出程序", command=self.exit_app).pack(side="right")
+        left_btns = ttk.Frame(left)
+        left_btns.pack(fill="x", pady=8)
+        ttk.Button(left_btns, text="选择目录", command=self.choose_dir).pack(side="left")
+        ttk.Button(left_btns, text="清空数据", command=self.clear_data).pack(side="left", padx=8)
+        ttk.Button(left_btns, text="退出程序", command=self.exit_app).pack(side="right")
 
-        # 参数设置
-        param_frame = ttk.Frame(root)
-        param_frame.pack(fill="x", pady=5)
-        ttk.Label(param_frame, text="切片间隔(秒):").pack(side="left")
+        # 右侧：参数设置 + 控制按钮 + 进度条
+        right = ttk.Frame(main)
+        right.pack(side="right", fill="y")
+
+        param_frame = ttk.LabelFrame(right, text="参数设置", style="Custom.TLabelframe")
+        param_frame.pack(fill="x", pady=8)
+
+        ttk.Label(param_frame, text="切片间隔(秒):").grid(row=0, column=0, sticky="w", padx=6, pady=6)
         self.seg_entry = ttk.Entry(param_frame, width=8)
         self.seg_entry.insert(0, str(DEFAULT_SEGMENT_SECONDS))
-        self.seg_entry.pack(side="left", padx=5)
+        self.seg_entry.grid(row=0, column=1, padx=6, pady=6)
 
-        ttk.Label(param_frame, text="上传线程数:").pack(side="left", padx=12)
+        ttk.Label(param_frame, text="上传线程数:").grid(row=1, column=0, sticky="w", padx=6, pady=6)
         self.thr_entry = ttk.Entry(param_frame, width=8)
         self.thr_entry.insert(0, str(DEFAULT_UPLOAD_THREADS))
-        self.thr_entry.pack(side="left", padx=5)
+        self.thr_entry.grid(row=1, column=1, padx=6, pady=6)
 
         self.after_delete_var = tk.BooleanVar(value=True)
         self.after_shutdown_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(param_frame, text="上传完成后删除切片", variable=self.after_delete_var).pack(side="left", padx=12)
-        ttk.Checkbutton(param_frame, text="上传完成后关机", variable=self.after_shutdown_var).pack(side="left", padx=12)
+        ttk.Checkbutton(param_frame, text="上传完成后删除切片", variable=self.after_delete_var).grid(row=2, column=0, sticky="w", padx=6, pady=6)
+        ttk.Checkbutton(param_frame, text="上传完成后关机", variable=self.after_shutdown_var).grid(row=2, column=1, sticky="w", padx=6, pady=6)
 
-        # 控制按钮
-        ctrl_frame = ttk.Frame(root)
-        ctrl_frame.pack(fill="x", pady=5)
+        ctrl_frame = ttk.Frame(right)
+        ctrl_frame.pack(fill="x", pady=12)
         self.start_btn = ttk.Button(ctrl_frame, text="开始上传", command=self.start_process)
-        self.start_btn.pack(side="left")
+        self.start_btn.pack(side="left", padx=6)
         self.stop_btn = ttk.Button(ctrl_frame, text="停止", command=self.stop_process)
-        self.stop_btn.pack(side="left", padx=8)
+        self.stop_btn.pack(side="left", padx=6)
         self.stop_btn.state(["disabled"])
 
-        # 进度条
-        self.progress = ttk.Progressbar(root, orient="horizontal", mode="determinate", length=820)
-        self.progress.pack(pady=6)
+        self.progress = ttk.Progressbar(right, orient="horizontal", mode="determinate", length=320)
+        self.progress.pack(fill="x", pady=10)
 
-        # 运行日志
-        log_box = ttk.LabelFrame(root, text="运行日志", padding=8)
-        log_box.pack(fill="both", expand=True, padx=10, pady=6)
+        # 日志区
+        log_box = ttk.LabelFrame(root, text="运行日志", padding=8, style="Custom.TLabelframe")
+        log_box.pack(fill="both", expand=True, padx=10, pady=(4, 6))
         self.log_text = tk.Text(log_box, height=10, wrap="none", font=("Consolas", 10), state="disabled")
         vsb = ttk.Scrollbar(log_box, command=self.log_text.yview)
         self.log_text.configure(yscrollcommand=vsb.set)
@@ -147,13 +150,15 @@ class VideoUploaderGUI:
         vsb.pack(side="right", fill="y")
         self._schedule_log_drain()
 
-        # 上传结果
-        result_box = ttk.LabelFrame(root, text="上传结果", padding=8)
-        result_box.pack(fill="x", padx=10, pady=6)
+        # 上传结果区
+        result_box = ttk.LabelFrame(root, text="上传结果", padding=8, style="Custom.TLabelframe")
+        result_box.pack(fill="x", padx=10, pady=(0, 10))
         self.result_text = tk.Text(result_box, height=6, wrap="word", font=("Consolas", 10), state="disabled")
         self.result_text.pack(fill="x")
 
+    # -------------------
     # 日志
+    # -------------------
     def log(self, msg):
         t = time.strftime("%H:%M:%S")
         self.log_q.put(f"[{t}] {msg}")
@@ -173,7 +178,9 @@ class VideoUploaderGUI:
         self.result_text.see("end")
         self.result_text.config(state="disabled")
 
+    # -------------------
     # 文件列表
+    # -------------------
     def choose_dir(self):
         d = filedialog.askdirectory(title="选择视频目录")
         if not d:
@@ -205,7 +212,9 @@ class VideoUploaderGUI:
         else:
             self.root.destroy()
 
+    # -------------------
     # 控制流程
+    # -------------------
     def start_process(self):
         if self.is_running:
             return
@@ -233,7 +242,9 @@ class VideoUploaderGUI:
     def stop_process(self):
         messagebox.showinfo("提示", "当前不支持强制中断 ffmpeg/上传，请等待当前视频完成。")
 
+    # -------------------
     # 后台线程：处理所有视频
+    # -------------------
     def _process_thread(self, segment_seconds, upload_threads):
         try:
             for idx, fp in enumerate(self.files, start=1):
@@ -254,7 +265,9 @@ class VideoUploaderGUI:
             self.is_running = False
             self.root.after(0, lambda: (self.start_btn.state(["!disabled"]), self.stop_btn.state(["disabled"])))
 
+    # -------------------
     # 单视频处理流程
+    # -------------------
     def _process_single_video(self, input_file, base, segment_seconds, upload_threads):
         ensure_dirs()
 
@@ -353,7 +366,9 @@ class VideoUploaderGUI:
 
         return True
 
+    # -------------------
     # 上传重试
+    # -------------------
     def _upload_with_retry(self, file_path, max_attempts=2):
         last_err = None
         for i in range(max_attempts):
@@ -364,7 +379,9 @@ class VideoUploaderGUI:
                 time.sleep(1.0)
         raise last_err
 
+    # -------------------
     # 清理文件
+    # -------------------
     def _cleanup_video_files(self, ts_files, playlist_path, silent=False):
         for f in ts_files:
             try:
@@ -378,7 +395,9 @@ class VideoUploaderGUI:
         if not silent:
             self.log("已清理切片与临时 m3u8")
 
+    # -------------------
     # 表格状态更新
+    # -------------------
     def _set_row_status(self, file_path, status):
         for iid in self.tree.get_children():
             vals = self.tree.item(iid, "values")
