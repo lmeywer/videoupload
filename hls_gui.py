@@ -108,6 +108,15 @@ class VideoUploaderGUI:
         self.tree.column("status", width=120, anchor="center")
         self.tree.pack(fill="both", expand=True)
 
+        # 右键菜单
+        self.menu = tk.Menu(self.root, tearoff=0)
+        self.menu.add_command(label="添加文件", command=self.add_file)
+        self.menu.add_command(label="删除文件", command=self.delete_selected)
+
+        # 绑定右键事件
+        self.tree.bind("<Button-3>", self.show_context_menu)
+
+
         left_btns = ttk.Frame(left)
         left_btns.pack(fill="x", pady=8)
         ttk.Button(left_btns, text="选择目录", command=self.choose_dir).pack(side="left")
@@ -180,6 +189,40 @@ class VideoUploaderGUI:
         self.files = list(dict.fromkeys(self.files))
         self.refresh_table()
         self.log(f"拖拽添加 {len(new_files)} 个文件")
+
+    def show_context_menu(self, event):
+        # 判断是否点在某一行
+        row_id = self.tree.identify_row(event.y)
+        if row_id:
+            # 有行 -> 添加和删除都可用
+            self.menu.entryconfig("删除文件", state="normal")
+        else:
+            # 没有行 -> 禁用删除
+            self.menu.entryconfig("删除文件", state="disabled")
+        self.menu.post(event.x_root, event.y_root)
+
+    def add_file(self):
+    filetypes = [("视频文件", "*.mp4 *.mkv *.ts")]
+    fp = filedialog.askopenfilename(title="选择视频文件", filetypes=filetypes)
+    if fp:
+        if fp.lower().endswith(VIDEO_EXTS):
+            self.files.append(fp)
+            self.files = list(dict.fromkeys(self.files))  # 去重
+            self.refresh_table()
+            self.log(f"添加文件：{fp}")
+
+    def delete_selected(self):
+    selected = self.tree.selection()
+    if not selected:
+        return
+    for iid in selected:
+        vals = self.tree.item(iid, "values")
+        if vals:
+            fp = vals[1]
+            if fp in self.files:
+                self.files.remove(fp)
+            self.tree.delete(iid)
+            self.log(f"删除文件：{fp}")
 
     def choose_dir(self):
         d = filedialog.askdirectory(title="选择视频目录")
