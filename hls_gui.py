@@ -101,9 +101,9 @@ class VideoUploaderGUI:
         self.tree.heading("name", text="文件名")
         self.tree.heading("path", text="路径")
         self.tree.heading("status", text="状态")
-        self.tree.column("name", width=220, anchor="w")
-        self.tree.column("path", width=520, anchor="w")
-        self.tree.column("status", width=120, anchor="center")
+        self.tree.column("name", width=200, anchor="w")
+        self.tree.column("path", width=420, anchor="w")
+        self.tree.column("status", width=60, anchor="center")
         self.tree.pack(fill="both", expand=True)
 
         # 拖拽绑定 + 右键菜单
@@ -132,7 +132,7 @@ class VideoUploaderGUI:
         # 右侧参数栏
         right = ttk.Frame(main)
         right.pack(side="right", fill="y")
-        right.config(width=600)
+        right.config(width=400)
 
         param_frame = ttk.LabelFrame(right, text="参数设置", style="Custom.TLabelframe")
         param_frame.pack(fill="x", pady=8)
