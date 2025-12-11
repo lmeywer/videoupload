@@ -132,7 +132,7 @@ class VideoUploaderGUI:
         # 右侧参数栏
         right = ttk.Frame(main)
         right.pack(side="right", fill="y")
-        right.config(width=260)
+        right.config(width=400)
 
         param_frame = ttk.LabelFrame(right, text="参数设置", style="Custom.TLabelframe")
         param_frame.pack(fill="x", pady=8)
