@@ -65,6 +65,7 @@ class VideoUploaderGUI:
         self.root = root
         self.center_window(1100, 700)
         self.root.title("批量视频切片上传工具")
+        self.root.configure(bg="#f0f4f8")
 
         ensure_dirs()
 
@@ -73,18 +74,22 @@ class VideoUploaderGUI:
             style.theme_use("clam")
         except tk.TclError:
             pass
-        style.configure("TButton", font=("Microsoft YaHei", 11), padding=6)
-        style.configure("TLabel", font=("Microsoft YaHei", 11))
-        style.configure("TEntry", font=("Microsoft YaHei", 11))
-        style.configure("Treeview", rowheight=24)
+
+        style.configure("TButton", font=("Microsoft YaHei", 11), padding=6,
+                        background="#3399ff", foreground="white", borderwidth=0)
+        style.configure("TLabel", font=("Microsoft YaHei", 11),
+                        background="#f0f4f8", foreground="#333333")
+        style.configure("TEntry", font=("Microsoft YaHei", 11),
+                        fieldbackground="white", foreground="#333333")
+        style.configure("Treeview", background="white", foreground="#333333",
+                        fieldbackground="white", bordercolor="#cccccc", rowheight=24)
+        style.map("Treeview", background=[("selected", "#e6f2ff")])
+        style.layout("Treeview", [('Treeview.treearea', {'sticky': 'nswe'})])
         style.configure("Custom.Horizontal.TProgressbar",
-                        troughcolor="white",
-                        background="#3399ff",
-                        bordercolor="#3399ff",
-                        lightcolor="#3399ff",
-                        darkcolor="#3399ff")
-        style.configure("Custom.TLabelframe", bordercolor="#3399ff")
-        style.configure("Custom.TLabelframe.Label", foreground="#3399ff")
+                        troughcolor="#e6f2ff", background="#3399ff",
+                        bordercolor="#3399ff", lightcolor="#3399ff", darkcolor="#3399ff")
+        style.configure("Custom.TLabelframe", bordercolor="#3399ff", background="#f0f4f8")
+        style.configure("Custom.TLabelframe.Label", foreground="#3399ff", background="#f0f4f8")
 
         self.files = []
         self.log_q = queue.Queue()
@@ -155,7 +160,6 @@ class VideoUploaderGUI:
         ctrl_frame.pack(fill="x", pady=12)
         self.start_btn = ttk.Button(ctrl_frame, text="开始处理", command=self.start_process)
         self.start_btn.pack(side="left", padx=6)
-
         self.stop_btn = ttk.Button(ctrl_frame, text="停止", command=self.stop_process)
         self.stop_btn.pack(side="left", padx=6)
         self.stop_btn.state(["disabled"])
@@ -165,8 +169,19 @@ class VideoUploaderGUI:
         # 日志区
         log_box = ttk.LabelFrame(root, text="运行日志", padding=8, style="Custom.TLabelframe")
         log_box.pack(fill="both", expand=True, padx=10, pady=(4, 6))
-        self.log_text = tk.Text(log_box, height=10, wrap="none", font=("Consolas", 10), state="disabled")
+        self.log_text = tk.Text(log_box, height=10, wrap="none",
+                                font=("Consolas", 10), state="disabled",
+                                background="white", foreground="#333333",
+                                relief="solid", borderwidth=1)
         self.log_text.pack(fill="both", expand=True)
+
+        # 在日志区下方加上传进度条（可选）
+        self.upload_progress = ttk.Progressbar(log_box, orient="horizontal",
+                                               mode="determinate", length=500,
+                                               style="Custom.Horizontal.TProgressbar")
+        self.upload_progress.pack(fill="x", pady=(6, 0))
+        self.upload_progress["value"] = 0
+        self.upload_progress["maximum"] = 100
 
         self._schedule_log_drain()
     # 居中窗口
@@ -191,7 +206,7 @@ class VideoUploaderGUI:
             self.log_text.config(state="disabled")
         self.root.after(120, self._schedule_log_drain)
 
-    # 拖拽事件（绑定在文件列表）
+    # 拖拽事件
     def on_drop(self, event):
         paths = self.root.tk.splitlist(event.data)
         new_files = []
@@ -210,7 +225,7 @@ class VideoUploaderGUI:
         self.refresh_table()
         self.log(f"拖拽添加 {len(new_files)} 个文件")
 
-    # 右键菜单：添加/删除
+    # 右键菜单
     def show_context_menu(self, event):
         row_id = self.tree.identify_row(event.y)
         if row_id:
@@ -243,7 +258,7 @@ class VideoUploaderGUI:
                 self.tree.delete(iid)
                 self.log(f"删除文件：{fp}")
 
-    # 选择目录扫描
+    # 选择目录
     def choose_dir(self):
         d = filedialog.askdirectory(title="选择视频目录")
         if not d:
@@ -257,7 +272,6 @@ class VideoUploaderGUI:
         self.refresh_table()
         self.log(f"已添加 {len(self.files)} 个视频文件")
 
-    # 刷新文件表
     def refresh_table(self):
         for item in self.tree.get_children():
             self.tree.delete(item)
@@ -276,12 +290,12 @@ class VideoUploaderGUI:
         else:
             self.root.destroy()
 
-    # 开始与停止
+    # 开始处理
     def start_process(self):
         if self.is_running:
             return
         if not self.files:
-            messagebox.showwarning("警告", "请先加载视频文件（拖拽、右键添加或选择目录）。")
+            messagebox.showwarning("警告", "请先加载视频文件。")
             return
         try:
             seg = int(self.seg_entry.get().strip())
@@ -306,46 +320,45 @@ class VideoUploaderGUI:
     def stop_process(self):
         messagebox.showinfo("提示", "当前不支持强制中断 ffmpeg/上传，请等待当前视频完成。")
 
-    # 后台线程：逐视频处理
+    # 后台线程
     def _process_thread(self, segment_seconds, upload_threads):
-    total = len(self.files)
-    completed = 0
-    try:
+        total = len(self.files)
+        completed = 0
         all_videos_success = True
-        for fp in self.files:
-            base = os.path.splitext(os.path.basename(fp))[0]
-            self._set_row_status(fp, "切片中")
-            ok = self._process_single_video(fp, base, segment_seconds, upload_threads)
-            if not ok:
-                self._set_row_status(fp, "部分失败")
-                all_videos_success = False
+        try:
+            for fp in self.files:
+                base = os.path.splitext(os.path.basename(fp))[0]
+                self._set_row_status(fp, "切片中")
+                ok = self._process_single_video(fp, base, segment_seconds, upload_threads)
+                if not ok:
+                    self._set_row_status(fp, "部分失败")
+                    all_videos_success = False
+                else:
+                    self._set_row_status(fp, "上传完成")
+                completed += 1
+                ratio = completed / total
+                self.root.after(0, lambda r=ratio: (self.progress.configure(value=r),
+                                                    self.progress_label.config(text=f"{r:.0%}")))
             else:
-                self._set_row_status(fp, "上传完成")
-            completed += 1
-            ratio = completed / total
-            self.root.after(0, lambda r=ratio: (self.progress.configure(value=r),
-                                                self.progress_label.config(text=f"{r:.0%}")))
-        else:
-            self.log("全部视频处理完成")
-            messagebox.showinfo("完成", "全部视频已处理完成！")
+                self.log("全部视频处理完成")
+                messagebox.showinfo("完成", "全部视频已处理完成！")
 
-            # ✅ 所有视频成功时删除整个 out 文件夹
-            if self.after_delete_var.get() and all_videos_success:
-                try:
-                    import shutil
-                    shutil.rmtree(OUTPUT_DIR)
-                    self.log(f"已删除整个切片输出文件夹：{OUTPUT_DIR}")
-                except Exception as e:
-                    self.log(f"删除输出文件夹失败：{e}")
+                # 所有视频成功时删除整个 out 文件夹
+                if self.after_delete_var.get() and all_videos_success:
+                    try:
+                        import shutil
+                        shutil.rmtree(OUTPUT_DIR)
+                        self.log(f"已删除整个切片输出文件夹：{OUTPUT_DIR}")
+                    except Exception as e:
+                        self.log(f"删除输出文件夹失败：{e}")
 
-            if self.after_shutdown_var.get():
-                shutdown_windows()
-    finally:
-        self.is_running = False
-        self.root.after(0, lambda: (self.start_btn.state(["!disabled"]), self.stop_btn.state(["disabled"])))
+                if self.after_shutdown_var.get():
+                    shutdown_windows()
+        finally:
+            self.is_running = False
+            self.root.after(0, lambda: (self.start_btn.state(["!disabled"]), self.stop_btn.state(["disabled"])))
 
-
-    # 单视频处理：切片 -> 并发上传 -> 生成 m3u8 -> 条件清理
+    # 单视频处理
     def _process_single_video(self, input_file, base, segment_seconds, upload_threads):
         video_dir = os.path.join(OUTPUT_DIR, base)
         os.makedirs(video_dir, exist_ok=True)
@@ -373,6 +386,10 @@ class VideoUploaderGUI:
             return False
         except subprocess.CalledProcessError as e:
             self.log("ffmpeg 错误：" + e.stderr.decode(errors="ignore"))
+            messagebox.showerror("错误", f"切片失败：{os.path.basename(input_file)}")
+            return False
+        except Exception as e:
+            self.log(f"切片失败：{e}")
             messagebox.showerror("错误", f"切片失败：{os.path.basename(input_file)}")
             return False
         self.log(f"切片完成：{input_file}")
@@ -407,7 +424,7 @@ class VideoUploaderGUI:
                 except Exception as e:
                     self.log(f"最终上传失败：{fname} -> {e}")
                     all_success = False
-                    continue  # 跳过失败的 ts，继续后面的
+                    continue
 
         # 生成 m3u8（成功的 ts 用 URL，失败的保留原文件名行）
         try:
@@ -454,7 +471,7 @@ class VideoUploaderGUI:
 
         return all_success
 
-    # 上传重试（第1次不标记次数，第2次及以上标注）
+    # 上传重试
     def _upload_with_retry(self, file_path, max_attempts=2):
         last_err = None
         for attempt in range(1, max_attempts + 1):
@@ -482,7 +499,7 @@ class VideoUploaderGUI:
 
 # 入口
 def main():
-    root = TkinterDnD.Tk()  # 使用支持拖拽的 Tk
+    root = TkinterDnD.Tk()
     app = VideoUploaderGUI(root)
     root.mainloop()
 
