@@ -308,29 +308,42 @@ class VideoUploaderGUI:
 
     # 后台线程：逐视频处理
     def _process_thread(self, segment_seconds, upload_threads):
-        total = len(self.files)
-        completed = 0
-        try:
-            for fp in self.files:
-                base = os.path.splitext(os.path.basename(fp))[0]
-                self._set_row_status(fp, "切片中")
-                ok = self._process_single_video(fp, base, segment_seconds, upload_threads)
-                if not ok:
-                    self._set_row_status(fp, "部分失败")
-                else:
-                    self._set_row_status(fp, "上传完成")
-                completed += 1
-                ratio = completed / total
-                self.root.after(0, lambda r=ratio: (self.progress.configure(value=r),
-                                                    self.progress_label.config(text=f"{r:.0%}")))
+    total = len(self.files)
+    completed = 0
+    try:
+        all_videos_success = True
+        for fp in self.files:
+            base = os.path.splitext(os.path.basename(fp))[0]
+            self._set_row_status(fp, "切片中")
+            ok = self._process_single_video(fp, base, segment_seconds, upload_threads)
+            if not ok:
+                self._set_row_status(fp, "部分失败")
+                all_videos_success = False
             else:
-                self.log("全部视频处理完成")
-                messagebox.showinfo("完成", "全部视频已处理完成！")
-                if self.after_shutdown_var.get():
-                    shutdown_windows()
-        finally:
-            self.is_running = False
-            self.root.after(0, lambda: (self.start_btn.state(["!disabled"]), self.stop_btn.state(["disabled"])))
+                self._set_row_status(fp, "上传完成")
+            completed += 1
+            ratio = completed / total
+            self.root.after(0, lambda r=ratio: (self.progress.configure(value=r),
+                                                self.progress_label.config(text=f"{r:.0%}")))
+        else:
+            self.log("全部视频处理完成")
+            messagebox.showinfo("完成", "全部视频已处理完成！")
+
+            # ✅ 所有视频成功时删除整个 out 文件夹
+            if self.after_delete_var.get() and all_videos_success:
+                try:
+                    import shutil
+                    shutil.rmtree(OUTPUT_DIR)
+                    self.log(f"已删除整个切片输出文件夹：{OUTPUT_DIR}")
+                except Exception as e:
+                    self.log(f"删除输出文件夹失败：{e}")
+
+            if self.after_shutdown_var.get():
+                shutdown_windows()
+    finally:
+        self.is_running = False
+        self.root.after(0, lambda: (self.start_btn.state(["!disabled"]), self.stop_btn.state(["disabled"])))
+
 
     # 单视频处理：切片 -> 并发上传 -> 生成 m3u8 -> 条件清理
     def _process_single_video(self, input_file, base, segment_seconds, upload_threads):
