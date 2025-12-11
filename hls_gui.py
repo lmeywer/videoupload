@@ -28,24 +28,27 @@ AUTHCODE = "97"
 VIDEO_EXTS = (".mp4", ".mkv", ".ts")
 
 # ================= 视觉配色 =================
-COLOR_BG_MAIN = "#F0F2F5"       # 窗口背景
-COLOR_CARD_BG = "#FFFFFF"       # 卡片背景
-COLOR_BORDER = "#DCDFE6"        # 边框灰
-COLOR_TEXT_MAIN = "#303133"     # 主字色
-COLOR_TEXT_SUB = "#909399"      # 提示字色
-COLOR_HEADER_BG = "#E4E7ED"     # 表头背景(加深)
+COLOR_BG_MAIN = "#F2F6FC"       # 窗口大背景 (极淡蓝灰)
+COLOR_CARD_BG = "#FFFFFF"       # 卡片背景白
+COLOR_BORDER_BLUE = "#3399ff"   # 【核心】回归你最初的蓝色边框
+COLOR_TEXT_MAIN = "#000000"     # 主字色 (黑)
+COLOR_TEXT_GRAY = "#606266"     # 次级字色
 
-# 按钮颜色
-COLOR_BTN_BLUE = "#89CFF0"
-COLOR_BTN_BLUE_HOVER = "#6CBEE3"
-COLOR_BTN_RED = "#F56C6C"
-COLOR_BTN_RED_HOVER = "#E64545"
+# 进度条颜色
+COLOR_PROG_BAR = "#3399ff"
 
-# 日志
-COLOR_LOG_BG = "#1E1E1E"
-COLOR_LOG_FG = "#67C23A"
+# 优化后的大按钮颜色
+COLOR_BTN_START = "#2b85e4"     # 沉稳的深亮蓝
+COLOR_BTN_START_HOVER = "#5cadff"
+COLOR_BTN_STOP = "#ff4d4f"      # 鲜艳的红
+COLOR_BTN_STOP_HOVER = "#ff7875"
 
-# ================= 核心逻辑 (保持不变) =================
+# 日志颜色
+COLOR_LOG_OUTER_BG = "#FFFFFF"  # 日志外框白
+COLOR_LOG_INNER_BG = "#1E1E1E"  # 日志内框黑
+COLOR_LOG_FG = "#00FF00"        # 日志绿字
+
+# ================= 核心逻辑 =================
 def upload_file(file_path):
     headers = {
         "authcode": AUTHCODE,
@@ -71,15 +74,11 @@ def ensure_dirs():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     os.makedirs(M3U8_DIR, exist_ok=True)
 
-def shutdown_windows():
-    if sys.platform.startswith("win"):
-        os.system("shutdown /s /t 5")
-
 # ================= GUI 界面类 =================
 class VideoUploaderGUI:
     def __init__(self, root):
         self.root = root
-        self.center_window(1000, 700)
+        self.center_window(1000, 720)
         self.root.title("批量视频切片上传工具 Pro")
         self.root.configure(bg=COLOR_BG_MAIN)
 
@@ -97,40 +96,42 @@ class VideoUploaderGUI:
         # ---------------------------------------------------------
         # 左侧卡片：任务列表
         # ---------------------------------------------------------
-        left_card = tk.Frame(top_container, bg=COLOR_CARD_BG, highlightbackground=COLOR_BORDER, highlightthickness=1)
+        # highlightbackground=COLOR_BORDER_BLUE: 设置边框颜色
+        left_card = tk.Frame(top_container, bg=COLOR_CARD_BG, 
+                             highlightbackground=COLOR_BORDER_BLUE, highlightthickness=1)
         left_card.pack(side="left", fill="both", expand=True, padx=(0, 15))
 
         # 1. 顶部工具栏
         header_frame = tk.Frame(left_card, bg=COLOR_CARD_BG, height=50)
         header_frame.pack(fill="x", padx=15, pady=15)
 
-        # 标题 "任务列表"
-        tk.Label(header_frame, text="任务列表", font=("Microsoft YaHei", 12, "bold"), bg=COLOR_CARD_BG, fg=COLOR_TEXT_MAIN).pack(side="left")
+        # 标题 "任务列表" (黑色)
+        tk.Label(header_frame, text="任务列表", font=("Microsoft YaHei", 12, "bold"), 
+                 bg=COLOR_CARD_BG, fg="black").pack(side="left")
 
-        # 按钮组 (使用 Frame 包装)
+        # 按钮组
         btn_box = tk.Frame(header_frame, bg=COLOR_CARD_BG)
         btn_box.pack(side="right")
 
-        # 统一宽度的按钮
-        self._create_icon_btn(btn_box, "🗑 清空列表", self.clear_data)
-        self._create_icon_btn(btn_box, "📄 添加文件", self.add_file)
-        self._create_icon_btn(btn_box, "📂 添加目录", self.choose_dir)
+        # 小按钮：使用蓝色边框
+        self._create_outline_btn(btn_box, "🗑 清空列表", self.clear_data)
+        self._create_outline_btn(btn_box, "📄 添加文件", self.add_file)
+        self._create_outline_btn(btn_box, "📂 添加目录", self.choose_dir)
 
-        # 2. 表格区域 (增加外边框容器，实现边框线和间距)
-        # 用一个深色 Frame 模拟边框，pady/padx 留出边距
-        table_border = tk.Frame(left_card, bg=COLOR_BORDER, padx=1, pady=1)
+        # 2. 表格区域
+        # 外层容器带蓝色边框
+        table_border = tk.Frame(left_card, bg=COLOR_BORDER_BLUE, padx=1, pady=1)
         table_border.pack(fill="both", expand=True, padx=15, pady=(0, 15))
 
         columns = ("name", "path", "status")
-        self.tree = ttk.Treeview(table_border, columns=columns, show="headings", selectmode="extended", style="Custom.Treeview")
+        self.tree = ttk.Treeview(table_border, columns=columns, show="headings", 
+                                 selectmode="extended", style="Custom.Treeview")
         
-        # 滚动条
         vsb = ttk.Scrollbar(table_border, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=vsb.set)
         vsb.pack(side="right", fill="y")
         self.tree.pack(side="left", fill="both", expand=True)
 
-        # 表头设置
         self.tree.heading("name", text="文件名")
         self.tree.heading("path", text="完整路径")
         self.tree.heading("status", text="当前状态")
@@ -138,109 +139,123 @@ class VideoUploaderGUI:
         self.tree.column("path", width=350, anchor="w")
         self.tree.column("status", width=120, anchor="center")
 
-        # 斑马纹 Tag
-        self.tree.tag_configure("evenrow", background="#FAFAFA") # 偶数行极淡灰
-        self.tree.tag_configure("oddrow", background="#FFFFFF")  # 奇数行纯白
+        self.tree.tag_configure("evenrow", background="#f2f8ff") # 极淡蓝
+        self.tree.tag_configure("oddrow", background="#FFFFFF")
 
-        # 拖拽绑定
         self.tree.drop_target_register(DND_FILES)
         self.tree.dnd_bind("<<Drop>>", self.on_drop)
         
-        # 右键菜单
-        self.menu = tk.Menu(root, tearoff=0, bg="white", fg=COLOR_TEXT_MAIN)
+        self.menu = tk.Menu(root, tearoff=0, bg="white", fg="black")
         self.menu.add_command(label="删除选中", command=self.delete_selected)
         self.tree.bind("<Button-3>", self.show_context_menu)
 
-        # 3. 底部进度条 (灰底)
-        footer_frame = tk.Frame(left_card, bg="#F5F7FA", height=45)
+        # 3. 底部进度条 (背景色稍作调整)
+        footer_frame = tk.Frame(left_card, bg="#FAFAFA", height=45)
         footer_frame.pack(fill="x", side="bottom")
         
-        tk.Label(footer_frame, text="总进度:", bg="#F5F7FA", fg=COLOR_TEXT_SUB, font=("Microsoft YaHei", 9)).pack(side="left", padx=(15, 5), pady=12)
+        # 总进度文字改为黑色
+        tk.Label(footer_frame, text="总进度:", bg="#FAFAFA", fg="black", 
+                 font=("Microsoft YaHei", 9)).pack(side="left", padx=(15, 5), pady=12)
         
-        self.progress = ttk.Progressbar(footer_frame, orient="horizontal", mode="determinate")
+        # 使用自定义的蓝色进度条样式
+        self.progress = ttk.Progressbar(footer_frame, orient="horizontal", mode="determinate", 
+                                        style="Blue.Horizontal.TProgressbar")
         self.progress.pack(side="left", fill="x", expand=True, padx=5, pady=12)
         
-        self.progress_label = tk.Label(footer_frame, text="0%", bg="#F5F7FA", fg="#409EFF", font=("Microsoft YaHei", 9, "bold"))
+        # 百分比文字
+        self.progress_label = tk.Label(footer_frame, text="0%", bg="#FAFAFA", fg="black", 
+                                       font=("Microsoft YaHei", 9, "bold"))
         self.progress_label.pack(side="right", padx=(5, 15), pady=12)
+
 
         # ---------------------------------------------------------
         # 右侧卡片：参数与控制
         # ---------------------------------------------------------
-        right_card = tk.Frame(top_container, bg=COLOR_CARD_BG, width=280, highlightbackground=COLOR_BORDER, highlightthickness=1)
+        right_card = tk.Frame(top_container, bg=COLOR_CARD_BG, width=280, 
+                              highlightbackground=COLOR_BORDER_BLUE, highlightthickness=1)
         right_card.pack(side="right", fill="y")
         right_card.pack_propagate(False)
 
-        tk.Label(right_card, text="⚙ 参数设置", font=("Microsoft YaHei", 12, "bold"), bg=COLOR_CARD_BG, fg=COLOR_TEXT_MAIN).pack(anchor="w", padx=20, pady=20)
+        tk.Label(right_card, text="⚙ 参数设置", font=("Microsoft YaHei", 12, "bold"), 
+                 bg=COLOR_CARD_BG, fg="black").pack(anchor="w", padx=20, pady=20)
 
         form_frame = tk.Frame(right_card, bg=COLOR_CARD_BG)
         form_frame.pack(fill="x", padx=20)
 
-        tk.Label(form_frame, text="切片间隔 (秒):", bg=COLOR_CARD_BG, fg=COLOR_TEXT_MAIN, font=("Microsoft YaHei", 10)).grid(row=0, column=0, sticky="w", pady=8)
-        self.seg_entry = ttk.Entry(form_frame, width=8, font=("Microsoft YaHei", 10))
+        # 输入框加上蓝色边框效果(通过highlight)
+        entry_kwargs = {"font": ("Microsoft YaHei", 10), "highlightbackground": COLOR_BORDER_BLUE, "highlightthickness": 1, "relief": "flat"}
+
+        tk.Label(form_frame, text="切片间隔 (秒):", bg=COLOR_CARD_BG, fg="black", font=("Microsoft YaHei", 10)).grid(row=0, column=0, sticky="w", pady=8)
+        self.seg_entry = tk.Entry(form_frame, width=8, **entry_kwargs)
         self.seg_entry.insert(0, str(DEFAULT_SEGMENT_SECONDS))
         self.seg_entry.grid(row=0, column=1, sticky="e", pady=8)
 
-        tk.Label(form_frame, text="上传线程数:", bg=COLOR_CARD_BG, fg=COLOR_TEXT_MAIN, font=("Microsoft YaHei", 10)).grid(row=1, column=0, sticky="w", pady=8)
-        self.thr_entry = ttk.Entry(form_frame, width=8, font=("Microsoft YaHei", 10))
+        tk.Label(form_frame, text="上传线程数:", bg=COLOR_CARD_BG, fg="black", font=("Microsoft YaHei", 10)).grid(row=1, column=0, sticky="w", pady=8)
+        self.thr_entry = tk.Entry(form_frame, width=8, **entry_kwargs)
         self.thr_entry.insert(0, str(DEFAULT_UPLOAD_THREADS))
         self.thr_entry.grid(row=1, column=1, sticky="e", pady=8)
 
-        chk_frame = tk.Frame(right_card, bg=COLOR_CARD_BG)
-        chk_frame.pack(fill="x", padx=16, pady=10)
-        
-        self.after_delete_var = tk.BooleanVar(value=False)
-        self.after_shutdown_var = tk.BooleanVar(value=False)
-        
-        chk_style = {"bg": COLOR_CARD_BG, "fg": COLOR_TEXT_MAIN, "activebackground": COLOR_CARD_BG, "selectcolor": COLOR_CARD_BG, "font": ("Microsoft YaHei", 9)}
-        tk.Checkbutton(chk_frame, text="完成后删除切片", variable=self.after_delete_var, **chk_style).pack(anchor="w", pady=2)
-        tk.Checkbutton(chk_frame, text="完成后自动关机", variable=self.after_shutdown_var, **chk_style).pack(anchor="w", pady=2)
+        # 分割线 (使用蓝色)
+        tk.Frame(right_card, bg=COLOR_BORDER_BLUE, height=1).pack(fill="x", padx=20, pady=20)
 
-        tk.Frame(right_card, bg=COLOR_BORDER, height=1).pack(fill="x", padx=20, pady=15)
-
-        self.start_btn = tk.Button(right_card, text="▶ 开始处理", bg=COLOR_BTN_BLUE, fg="white",
-                                   font=("Microsoft YaHei", 11, "bold"), relief="flat",
-                                   activebackground=COLOR_BTN_BLUE_HOVER, activeforeground="white",
+        # === 按钮区域 ===
+        # 1. 开始处理 (优化后的蓝色)
+        self.start_btn = tk.Button(right_card, text="▶ 开始处理", bg=COLOR_BTN_START, fg="white",
+                                   font=("Microsoft YaHei", 12, "bold"), relief="flat",
+                                   activebackground=COLOR_BTN_START_HOVER, activeforeground="white",
                                    cursor="hand2", command=self.start_process)
-        self.start_btn.pack(fill="x", padx=20, pady=(5, 10), ipady=6)
+        self.start_btn.pack(fill="x", padx=20, pady=(5, 10), ipady=8)
 
-        self.stop_btn = tk.Button(right_card, text="■ 停止任务", bg=COLOR_BTN_RED, fg="white",
-                                  font=("Microsoft YaHei", 11, "bold"), relief="flat",
-                                  activebackground=COLOR_BTN_RED_HOVER, activeforeground="white",
+        # 2. 停止任务 (优化后的红色)
+        self.stop_btn = tk.Button(right_card, text="■ 停止任务", bg=COLOR_BTN_STOP, fg="white",
+                                  font=("Microsoft YaHei", 12, "bold"), relief="flat",
+                                  activebackground=COLOR_BTN_STOP_HOVER, activeforeground="white",
                                   state="disabled", cursor="arrow", command=self.stop_process)
-        self.stop_btn.pack(fill="x", padx=20, pady=(0, 10), ipady=6)
+        self.stop_btn.pack(fill="x", padx=20, pady=(0, 10), ipady=8)
 
-        tk.Button(right_card, text="退出程序", bg="white", fg=COLOR_TEXT_MAIN,
-                  font=("Microsoft YaHei", 10), relief="solid", bd=1,
-                  activebackground="#F2F6FC", cursor="hand2",
-                  command=self.exit_app).pack(fill="x", padx=20, pady=(0, 10), ipady=3)
+        # 3. 退出程序 (白底 + 蓝色边框)
+        tk.Button(right_card, text="退出程序", bg="white", fg="black",
+                  font=("Microsoft YaHei", 10), relief="flat",
+                  highlightbackground=COLOR_BORDER_BLUE, highlightthickness=1, # 蓝色边框
+                  bd=0,
+                  activebackground="#ecf5ff", cursor="hand2",
+                  command=self.exit_app).pack(fill="x", padx=20, pady=(10, 10), ipady=4)
 
-        tk.Label(right_card, text="提示: 拖拽文件夹可快速添加", bg=COLOR_CARD_BG, fg=COLOR_TEXT_SUB, font=("Microsoft YaHei", 8)).pack(side="bottom", pady=20)
+        tk.Label(right_card, text="提示: 拖拽文件夹可快速添加", bg=COLOR_CARD_BG, fg=COLOR_TEXT_GRAY, 
+                 font=("Microsoft YaHei", 8)).pack(side="bottom", pady=20)
 
 
         # ---------------------------------------------------------
-        # 底部日志
+        # 底部日志 (外白内黑，蓝框)
         # ---------------------------------------------------------
-        log_frame = tk.Frame(root, bg=COLOR_LOG_BG, height=160)
-        log_frame.pack(side="bottom", fill="x")
-        log_frame.pack_propagate(False)
+        # 外层容器，带蓝色边框
+        log_container = tk.Frame(root, bg=COLOR_LOG_OUTER_BG, height=160,
+                                 highlightbackground=COLOR_BORDER_BLUE, highlightthickness=1)
+        log_container.pack(side="bottom", fill="x", padx=20, pady=(0, 20))
+        log_container.pack_propagate(False)
 
-        log_header = tk.Frame(log_frame, bg="#2D2D2D", height=24)
+        # 日志标题条 (浅色背景，黑色文字)
+        log_header = tk.Frame(log_container, bg="#E9EEF3", height=28)
         log_header.pack(fill="x")
-        tk.Label(log_header, text=" 📄 运行日志", bg="#2D2D2D", fg="#909399", font=("Consolas", 9)).pack(side="left")
+        tk.Label(log_header, text=" 📄 运行日志", bg="#E9EEF3", fg="black", 
+                 font=("Microsoft YaHei", 9, "bold")).pack(side="left")
 
-        self.log_text = tk.Text(log_frame, bg=COLOR_LOG_BG, fg=COLOR_LOG_FG,
+        # 内层文本框 (黑底绿字)
+        self.log_text = tk.Text(log_container, bg=COLOR_LOG_INNER_BG, fg=COLOR_LOG_FG,
                                 font=("Consolas", 10), relief="flat", padx=10, pady=5, state="disabled")
         self.log_text.pack(fill="both", expand=True)
 
         self._schedule_log_drain()
 
-    # 辅助方法：创建统一大小的文字按钮
-    def _create_icon_btn(self, parent, text, command):
-        # width=10 确保按钮宽度一致
+    # 辅助方法：创建带蓝色边框的小按钮
+    def _create_outline_btn(self, parent, text, command):
+        # 使用 tk.Button 以支持 highlightthickness (边框颜色)
         btn = tk.Button(parent, text=text, font=("Microsoft YaHei", 9), width=10,
-                        bg="#F2F3F5", fg=COLOR_TEXT_MAIN, # 浅灰背景让按钮更像按钮
-                        activebackground="#E4E6E8", activeforeground=COLOR_BTN_BLUE,
-                        relief="flat", cursor="hand2", command=command)
+                        bg="white", fg="black",
+                        relief="flat", bd=0,
+                        highlightbackground=COLOR_BORDER_BLUE, highlightthickness=1, # 蓝色边框
+                        activebackground="#ecf5ff", 
+                        cursor="hand2", command=command)
         btn.pack(side="right", padx=5)
 
     def _setup_styles(self):
@@ -254,19 +269,27 @@ class VideoUploaderGUI:
         style.configure("Custom.Treeview", 
                         background="white",
                         fieldbackground="white",
-                        foreground=COLOR_TEXT_MAIN,
+                        foreground="black",
                         font=("Microsoft YaHei", 10),
                         rowheight=32,
                         borderwidth=0)
         
-        # 表头样式：加深颜色，加粗，凸起效果(relief='raised')模拟边框
+        # 表头样式 (浅蓝背景)
         style.configure("Custom.Treeview.Heading", 
                         font=("Microsoft YaHei", 9, "bold"),
-                        background=COLOR_HEADER_BG, # 更深的灰
-                        foreground="#303133",
-                        relief="raised") # 模拟按钮凸起，增加分割感
+                        background="#eef1f6", 
+                        foreground="black",
+                        relief="flat")
         
-        style.map("Custom.Treeview", background=[("selected", "#ECF5FF")], foreground=[("selected", COLOR_TEXT_MAIN)])
+        style.map("Custom.Treeview", background=[("selected", "#cce5ff")], foreground=[("selected", "black")])
+
+        # 自定义蓝色进度条
+        style.configure("Blue.Horizontal.TProgressbar",
+                        troughcolor="#E6E6E6",   # 槽颜色
+                        background=COLOR_PROG_BAR, # 进度条颜色 (你的蓝)
+                        lightcolor=COLOR_PROG_BAR, 
+                        darkcolor=COLOR_PROG_BAR,
+                        bordercolor=COLOR_PROG_BAR)
 
     def center_window(self, width, height):
         screen_width = self.root.winfo_screenwidth()
@@ -352,7 +375,6 @@ class VideoUploaderGUI:
         for item in self.tree.get_children():
             self.tree.delete(item)
         for i, fp in enumerate(self.files):
-            # 交替斑马纹
             tag = "evenrow" if i % 2 == 0 else "oddrow"
             self.tree.insert("", "end", values=(os.path.basename(fp), fp, "等待中"), tags=(tag,))
 
@@ -371,8 +393,9 @@ class VideoUploaderGUI:
         except: return
         
         self.is_running = True
-        self.start_btn.config(bg="#A0CFFF", state="disabled", cursor="arrow")
-        self.stop_btn.config(state="normal", bg=COLOR_BTN_RED, cursor="hand2")
+        # 运行时禁用开始，启用停止
+        self.start_btn.config(state="disabled", bg="#a0cfff") 
+        self.stop_btn.config(state="normal", bg=COLOR_BTN_STOP)
         self.progress["value"] = 0
         self.progress_label.config(text="0%")
         
@@ -395,20 +418,21 @@ class VideoUploaderGUI:
             self.root.after(0, lambda r=ratio: (self.progress.configure(value=r), self.progress_label.config(text=f"{int(r)}%")))
         
         self.log("全部任务完成")
-        if self.after_delete_var.get():
-             try:
-                 import shutil
-                 shutil.rmtree(OUTPUT_DIR)
-                 self.log("已清理切片目录")
-             except: pass
-        if self.after_shutdown_var.get(): shutdown_windows()
+        
+        # 默认执行删除逻辑，不再判断变量
+        try:
+             import shutil
+             if os.path.exists(OUTPUT_DIR):
+                shutil.rmtree(OUTPUT_DIR)
+             self.log("已清理切片临时目录")
+        except: pass
         
         self.is_running = False
         self.root.after(0, self._reset_btn)
 
     def _reset_btn(self):
-        self.start_btn.config(bg=COLOR_BTN_BLUE, state="normal", cursor="hand2")
-        self.stop_btn.config(bg=COLOR_BTN_RED, state="disabled", cursor="arrow")
+        self.start_btn.config(state="normal", bg=COLOR_BTN_START)
+        self.stop_btn.config(state="disabled", bg="#ff9999") # 变浅红
 
     def _update_status(self, fp, status):
         self.root.after(0, lambda: self._tree_set(fp, status))
@@ -477,11 +501,11 @@ class VideoUploaderGUI:
             with open(os.path.join(M3U8_DIR, f"{base}.m3u8"), "w", encoding="utf-8") as f:
                 f.writelines(lines)
             
-            if self.after_delete_var.get():
-                try:
-                    for f in ts_files: os.remove(os.path.join(video_dir, f))
-                    os.rmdir(video_dir)
-                except: pass
+            # 默认删除
+            try:
+                for f in ts_files: os.remove(os.path.join(video_dir, f))
+                os.rmdir(video_dir)
+            except: pass
             return True
         except: return False
 
