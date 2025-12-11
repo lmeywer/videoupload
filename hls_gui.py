@@ -89,9 +89,6 @@ class VideoUploaderGUI:
         self.log_q = queue.Queue()
         self.is_running = False
 
-        header = ttk.Label(root, text="批量视频切片上传工具", font=("Microsoft YaHei", 16, "bold"))
-        header.pack(pady=10)
-
         main = ttk.Frame(root, padding=10)
         main.pack(fill="both", expand=True)
 
