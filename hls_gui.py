@@ -116,8 +116,9 @@ class VideoUploaderGUI:
         table_border.pack(fill="both", expand=True, padx=15, pady=(0, 15))
 
         columns = ("name", "path", "status")
+        # 【修复点】删除了 bd=0
         self.tree = ttk.Treeview(table_border, columns=columns, show="headings", 
-                                 selectmode="extended", style="Custom.Treeview", bd=0)
+                                 selectmode="extended", style="Custom.Treeview")
         
         vsb = ttk.Scrollbar(table_border, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=vsb.set)
@@ -252,6 +253,7 @@ class VideoUploaderGUI:
         except:
             pass
         
+        # 样式中已设置 borderwidth=0，无需在 __init__ 中设置 bd=0
         style.configure("Custom.Treeview", 
                         background="white",
                         fieldbackground="white",
@@ -393,23 +395,20 @@ class VideoUploaderGUI:
     def stop_process(self):
         messagebox.showinfo("提示", "当前不支持强行中断，请等待当前文件完成")
 
-    # ================= 修改后的核心处理逻辑 =================
     def _process_thread(self, seg, thr):
-        # 1. 计算总大小（字节）
         total_size = 0
         for fp in self.files:
             try:
                 total_size += os.path.getsize(fp)
             except: pass
         
-        if total_size == 0: total_size = 1 # 防止除以0
+        if total_size == 0: total_size = 1 
         
-        current_base_progress = 0.0 # 已完成文件的总权重进度
+        current_base_progress = 0.0
 
         self.log(f"开始任务，总大小: {total_size/1024/1024:.2f} MB")
 
         for i, fp in enumerate(self.files):
-            # 计算当前文件的权重 (0.0 - 1.0)
             file_size = 0
             try: file_size = os.path.getsize(fp)
             except: pass
@@ -420,13 +419,10 @@ class VideoUploaderGUI:
             self._update_status(fp, "⚡ 切片中")
             self._focus_row(fp)
             
-            # 传入权重参数
             ok = self._process_single(fp, base, seg, thr, file_weight, current_base_progress)
             self._update_status(fp, "✅ 完成" if ok else "❌ 失败")
             
-            # 文件完成后，将该文件的权重完全加到基础进度中
             current_base_progress += file_weight
-            # 确保 UI 更新到这一阶段的满额
             self._update_progress_ui(current_base_progress * 100)
 
         self.log("全部任务完成")
@@ -459,7 +455,6 @@ class VideoUploaderGUI:
                 self.root.after(0, lambda: self.tree.see(iid))
                 self.root.after(0, lambda: self.tree.selection_set(iid))
 
-    # 更新总进度条UI
     def _update_progress_ui(self, val):
         if val > 100: val = 100
         self.root.after(0, lambda v=val: (
@@ -492,7 +487,7 @@ class VideoUploaderGUI:
         
         total_ts = len(ts_files)
         uploaded_ts_count = 0
-        lock = threading.Lock() # 线程锁，防止计数冲突
+        lock = threading.Lock()
 
         def _u(fpath):
             for _ in range(3):
@@ -510,18 +505,12 @@ class VideoUploaderGUI:
                     
                     with lock:
                         uploaded_ts_count += 1
-                        # === 关键算法 ===
-                        # 1. 当前文件已上传比例 (0.0 - 1.0)
                         file_progress = uploaded_ts_count / total_ts
-                        # 2. 当前文件对总进度的贡献 = 文件权重 * 文件进度
                         file_contribution = file_weight * file_progress
-                        # 3. 总进度 = 之前文件的进度 + 当前文件贡献
                         total_percent = (base_progress + file_contribution) * 100
                         
-                        # 更新UI
                         self._update_progress_ui(total_percent)
                         
-                        # 更新表格里的状态
                         percent_str = int(file_progress * 100)
                         self._update_status(input_file, f"☁ {percent_str}%")
                     
