@@ -27,20 +27,25 @@ UPLOAD_URL = (
 AUTHCODE = "97"
 VIDEO_EXTS = (".mp4", ".mkv", ".ts")
 
-# 颜色配置 (现代配色)
-COLOR_BG = "#F5F7FA"          # 整体背景淡灰
-COLOR_WHITE = "#FFFFFF"
-COLOR_PRIMARY = "#2563EB"     # 主色调 蓝
-COLOR_PRIMARY_HOVER = "#1D4ED8"
-COLOR_DANGER = "#DC2626"      # 危险色 红
-COLOR_DANGER_HOVER = "#B91C1C"
-COLOR_TEXT = "#1F2937"        # 深灰字体
-COLOR_TEXT_LIGHT = "#6B7280"  # 浅灰字体
-COLOR_BORDER = "#E5E7EB"      # 边框色
-COLOR_CONSOLE_BG = "#1E1E1E"  # 日志深色背景
-COLOR_CONSOLE_FG = "#10B981"  # 日志绿色字体
+# ================= 视觉配色 =================
+COLOR_BG_MAIN = "#F0F2F5"       # 窗口背景
+COLOR_CARD_BG = "#FFFFFF"       # 卡片背景
+COLOR_BORDER = "#DCDFE6"        # 边框灰
+COLOR_TEXT_MAIN = "#303133"     # 主字色
+COLOR_TEXT_SUB = "#909399"      # 提示字色
+COLOR_HEADER_BG = "#E4E7ED"     # 表头背景(加深)
 
-# ================= 核心逻辑部分 (保持不变) =================
+# 按钮颜色
+COLOR_BTN_BLUE = "#89CFF0"
+COLOR_BTN_BLUE_HOVER = "#6CBEE3"
+COLOR_BTN_RED = "#F56C6C"
+COLOR_BTN_RED_HOVER = "#E64545"
+
+# 日志
+COLOR_LOG_BG = "#1E1E1E"
+COLOR_LOG_FG = "#67C23A"
+
+# ================= 核心逻辑 (保持不变) =================
 def upload_file(file_path):
     headers = {
         "authcode": AUTHCODE,
@@ -70,234 +75,198 @@ def shutdown_windows():
     if sys.platform.startswith("win"):
         os.system("shutdown /s /t 5")
 
-# ================= 界面 GUI 部分 (重构) =================
+# ================= GUI 界面类 =================
 class VideoUploaderGUI:
     def __init__(self, root):
         self.root = root
-        self.center_window(1100, 720)
+        self.center_window(1000, 700)
         self.root.title("批量视频切片上传工具 Pro")
-        self.root.configure(bg=COLOR_BG)
+        self.root.configure(bg=COLOR_BG_MAIN)
 
         ensure_dirs()
-        self._setup_styles() # 初始化样式
+        self._setup_styles()
 
         self.files = []
         self.log_q = queue.Queue()
         self.is_running = False
 
-        # --- 主容器 ---
-        main_container = ttk.Frame(root, style="Main.TFrame")
-        main_container.pack(fill="both", expand=True, padx=20, pady=20)
+        # === 主布局容器 ===
+        top_container = tk.Frame(root, bg=COLOR_BG_MAIN)
+        top_container.pack(side="top", fill="both", expand=True, padx=20, pady=20)
 
-        # === 上半部分：左右布局 ===
-        top_area = ttk.Frame(main_container, style="Main.TFrame")
-        top_area.pack(fill="both", expand=True)
+        # ---------------------------------------------------------
+        # 左侧卡片：任务列表
+        # ---------------------------------------------------------
+        left_card = tk.Frame(top_container, bg=COLOR_CARD_BG, highlightbackground=COLOR_BORDER, highlightthickness=1)
+        left_card.pack(side="left", fill="both", expand=True, padx=(0, 15))
 
-        # --- 左侧：文件列表 ---
-        left_panel = ttk.Frame(top_area, style="Main.TFrame")
-        left_panel.pack(side="left", fill="both", expand=True, padx=(0, 15))
+        # 1. 顶部工具栏
+        header_frame = tk.Frame(left_card, bg=COLOR_CARD_BG, height=50)
+        header_frame.pack(fill="x", padx=15, pady=15)
 
-        # 标题栏
-        lbl_title = ttk.Label(left_panel, text="任务列表", font=("Microsoft YaHei", 12, "bold"), foreground=COLOR_TEXT)
-        lbl_title.pack(anchor="w", pady=(0, 10))
+        # 标题 "任务列表"
+        tk.Label(header_frame, text="任务列表", font=("Microsoft YaHei", 12, "bold"), bg=COLOR_CARD_BG, fg=COLOR_TEXT_MAIN).pack(side="left")
 
-        # 表格区域 (带滚动条)
-        tree_frame = ttk.Frame(left_panel)
-        tree_frame.pack(fill="both", expand=True)
-        
+        # 按钮组 (使用 Frame 包装)
+        btn_box = tk.Frame(header_frame, bg=COLOR_CARD_BG)
+        btn_box.pack(side="right")
+
+        # 统一宽度的按钮
+        self._create_icon_btn(btn_box, "🗑 清空列表", self.clear_data)
+        self._create_icon_btn(btn_box, "📄 添加文件", self.add_file)
+        self._create_icon_btn(btn_box, "📂 添加目录", self.choose_dir)
+
+        # 2. 表格区域 (增加外边框容器，实现边框线和间距)
+        # 用一个深色 Frame 模拟边框，pady/padx 留出边距
+        table_border = tk.Frame(left_card, bg=COLOR_BORDER, padx=1, pady=1)
+        table_border.pack(fill="both", expand=True, padx=15, pady=(0, 15))
+
         columns = ("name", "path", "status")
-        self.tree = ttk.Treeview(tree_frame, columns=columns, show="headings", height=15, selectmode="extended")
+        self.tree = ttk.Treeview(table_border, columns=columns, show="headings", selectmode="extended", style="Custom.Treeview")
         
         # 滚动条
-        vsb = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview)
+        vsb = ttk.Scrollbar(table_border, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=vsb.set)
         vsb.pack(side="right", fill="y")
         self.tree.pack(side="left", fill="both", expand=True)
 
-        # 表头与列设置
+        # 表头设置
         self.tree.heading("name", text="文件名")
         self.tree.heading("path", text="完整路径")
         self.tree.heading("status", text="当前状态")
-        self.tree.column("name", width=220, anchor="w")
-        self.tree.column("path", width=380, anchor="w")
+        self.tree.column("name", width=200, anchor="w")
+        self.tree.column("path", width=350, anchor="w")
         self.tree.column("status", width=120, anchor="center")
-        
-        # 拖拽与菜单
+
+        # 斑马纹 Tag
+        self.tree.tag_configure("evenrow", background="#FAFAFA") # 偶数行极淡灰
+        self.tree.tag_configure("oddrow", background="#FFFFFF")  # 奇数行纯白
+
+        # 拖拽绑定
         self.tree.drop_target_register(DND_FILES)
         self.tree.dnd_bind("<<Drop>>", self.on_drop)
-        self.create_context_menu()
-
-        # 进度条区域
-        prog_frame = ttk.Frame(left_panel, style="Main.TFrame")
-        prog_frame.pack(fill="x", pady=(15, 5))
         
-        prog_info_frame = ttk.Frame(prog_frame, style="Main.TFrame")
-        prog_info_frame.pack(fill="x", pady=(0, 5))
-        ttk.Label(prog_info_frame, text="总进度", font=("Microsoft YaHei", 9), foreground=COLOR_TEXT_LIGHT).pack(side="left")
-        self.progress_label = ttk.Label(prog_info_frame, text="0%", font=("Microsoft YaHei", 9, "bold"), foreground=COLOR_PRIMARY)
-        self.progress_label.pack(side="right")
+        # 右键菜单
+        self.menu = tk.Menu(root, tearoff=0, bg="white", fg=COLOR_TEXT_MAIN)
+        self.menu.add_command(label="删除选中", command=self.delete_selected)
+        self.tree.bind("<Button-3>", self.show_context_menu)
 
-        self.progress = ttk.Progressbar(prog_frame, orient="horizontal", mode="determinate", style="Thinking.Horizontal.TProgressbar")
-        self.progress.pack(fill="x", ipady=2) # ipady让进度条变厚
-
-        # 左侧按钮栏 (次要操作)
-        action_bar = ttk.Frame(left_panel, style="Main.TFrame")
-        action_bar.pack(fill="x", pady=10)
+        # 3. 底部进度条 (灰底)
+        footer_frame = tk.Frame(left_card, bg="#F5F7FA", height=45)
+        footer_frame.pack(fill="x", side="bottom")
         
-        self.btn_add = ttk.Button(action_bar, text="📂 选择目录", style="Secondary.TButton", command=self.choose_dir)
-        self.btn_add.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        tk.Label(footer_frame, text="总进度:", bg="#F5F7FA", fg=COLOR_TEXT_SUB, font=("Microsoft YaHei", 9)).pack(side="left", padx=(15, 5), pady=12)
         
-        self.btn_clear = ttk.Button(action_bar, text="🗑️ 清空列表", style="Secondary.TButton", command=self.clear_data)
-        self.btn_clear.pack(side="left", fill="x", expand=True, padx=(5, 0))
+        self.progress = ttk.Progressbar(footer_frame, orient="horizontal", mode="determinate")
+        self.progress.pack(side="left", fill="x", expand=True, padx=5, pady=12)
+        
+        self.progress_label = tk.Label(footer_frame, text="0%", bg="#F5F7FA", fg="#409EFF", font=("Microsoft YaHei", 9, "bold"))
+        self.progress_label.pack(side="right", padx=(5, 15), pady=12)
 
+        # ---------------------------------------------------------
+        # 右侧卡片：参数与控制
+        # ---------------------------------------------------------
+        right_card = tk.Frame(top_container, bg=COLOR_CARD_BG, width=280, highlightbackground=COLOR_BORDER, highlightthickness=1)
+        right_card.pack(side="right", fill="y")
+        right_card.pack_propagate(False)
 
-        # --- 右侧：控制面板 ---
-        right_panel = ttk.Frame(top_area, style="Card.TFrame", padding=20)
-        right_panel.pack(side="right", fill="y", padx=(5, 0))
-        right_panel.pack_propagate(False)
-        right_panel.config(width=320) # 固定宽度
+        tk.Label(right_card, text="⚙ 参数设置", font=("Microsoft YaHei", 12, "bold"), bg=COLOR_CARD_BG, fg=COLOR_TEXT_MAIN).pack(anchor="w", padx=20, pady=20)
 
-        # 参数设置区
-        ttk.Label(right_panel, text="参数配置", font=("Microsoft YaHei", 12, "bold"), foreground=COLOR_TEXT).pack(anchor="w", pady=(0, 15))
+        form_frame = tk.Frame(right_card, bg=COLOR_CARD_BG)
+        form_frame.pack(fill="x", padx=20)
 
-        # 使用 Grid 布局参数
-        param_grid = ttk.Frame(right_panel, style="Card.TFrame")
-        param_grid.pack(fill="x")
-
-        ttk.Label(param_grid, text="切片间隔 (s):", style="Param.TLabel").grid(row=0, column=0, sticky="w", pady=8)
-        self.seg_entry = ttk.Entry(param_grid, width=10, font=("Microsoft YaHei", 10))
+        tk.Label(form_frame, text="切片间隔 (秒):", bg=COLOR_CARD_BG, fg=COLOR_TEXT_MAIN, font=("Microsoft YaHei", 10)).grid(row=0, column=0, sticky="w", pady=8)
+        self.seg_entry = ttk.Entry(form_frame, width=8, font=("Microsoft YaHei", 10))
         self.seg_entry.insert(0, str(DEFAULT_SEGMENT_SECONDS))
         self.seg_entry.grid(row=0, column=1, sticky="e", pady=8)
 
-        ttk.Label(param_grid, text="上传线程数:", style="Param.TLabel").grid(row=1, column=0, sticky="w", pady=8)
-        self.thr_entry = ttk.Entry(param_grid, width=10, font=("Microsoft YaHei", 10))
+        tk.Label(form_frame, text="上传线程数:", bg=COLOR_CARD_BG, fg=COLOR_TEXT_MAIN, font=("Microsoft YaHei", 10)).grid(row=1, column=0, sticky="w", pady=8)
+        self.thr_entry = ttk.Entry(form_frame, width=8, font=("Microsoft YaHei", 10))
         self.thr_entry.insert(0, str(DEFAULT_UPLOAD_THREADS))
         self.thr_entry.grid(row=1, column=1, sticky="e", pady=8)
 
-        ttk.Separator(right_panel, orient="horizontal").pack(fill="x", pady=20)
-
-        # 选项
+        chk_frame = tk.Frame(right_card, bg=COLOR_CARD_BG)
+        chk_frame.pack(fill="x", padx=16, pady=10)
+        
         self.after_delete_var = tk.BooleanVar(value=False)
         self.after_shutdown_var = tk.BooleanVar(value=False)
         
-        chk_del = ttk.Checkbutton(right_panel, text="上传完成后删除切片", variable=self.after_delete_var, style="Custom.TCheckbutton")
-        chk_del.pack(anchor="w", pady=5)
-        
-        chk_off = ttk.Checkbutton(right_panel, text="任务完成后自动关机", variable=self.after_shutdown_var, style="Custom.TCheckbutton")
-        chk_off.pack(anchor="w", pady=5)
+        chk_style = {"bg": COLOR_CARD_BG, "fg": COLOR_TEXT_MAIN, "activebackground": COLOR_CARD_BG, "selectcolor": COLOR_CARD_BG, "font": ("Microsoft YaHei", 9)}
+        tk.Checkbutton(chk_frame, text="完成后删除切片", variable=self.after_delete_var, **chk_style).pack(anchor="w", pady=2)
+        tk.Checkbutton(chk_frame, text="完成后自动关机", variable=self.after_shutdown_var, **chk_style).pack(anchor="w", pady=2)
 
-        ttk.Separator(right_panel, orient="horizontal").pack(fill="x", pady=20)
+        tk.Frame(right_card, bg=COLOR_BORDER, height=1).pack(fill="x", padx=20, pady=15)
 
-        # 大按钮区域
-        self.start_btn = ttk.Button(right_panel, text="▶ 开始处理", style="Primary.TButton", command=self.start_process)
-        self.start_btn.pack(fill="x", pady=(0, 10), ipady=5)
+        self.start_btn = tk.Button(right_card, text="▶ 开始处理", bg=COLOR_BTN_BLUE, fg="white",
+                                   font=("Microsoft YaHei", 11, "bold"), relief="flat",
+                                   activebackground=COLOR_BTN_BLUE_HOVER, activeforeground="white",
+                                   cursor="hand2", command=self.start_process)
+        self.start_btn.pack(fill="x", padx=20, pady=(5, 10), ipady=6)
 
-        self.stop_btn = ttk.Button(right_panel, text="⏹ 停止任务", style="Danger.TButton", command=self.stop_process)
-        self.stop_btn.pack(fill="x", pady=(0, 10), ipady=5)
-        self.stop_btn.state(["disabled"])
+        self.stop_btn = tk.Button(right_card, text="■ 停止任务", bg=COLOR_BTN_RED, fg="white",
+                                  font=("Microsoft YaHei", 11, "bold"), relief="flat",
+                                  activebackground=COLOR_BTN_RED_HOVER, activeforeground="white",
+                                  state="disabled", cursor="arrow", command=self.stop_process)
+        self.stop_btn.pack(fill="x", padx=20, pady=(0, 10), ipady=6)
 
-        spacer = ttk.Frame(right_panel, style="Card.TFrame")
-        spacer.pack(fill="both", expand=True) # 占位符，把退出按钮顶到底部
+        tk.Button(right_card, text="退出程序", bg="white", fg=COLOR_TEXT_MAIN,
+                  font=("Microsoft YaHei", 10), relief="solid", bd=1,
+                  activebackground="#F2F6FC", cursor="hand2",
+                  command=self.exit_app).pack(fill="x", padx=20, pady=(0, 10), ipady=3)
 
-        ttk.Button(right_panel, text="退出程序", style="Secondary.TButton", command=self.exit_app).pack(fill="x")
+        tk.Label(right_card, text="提示: 拖拽文件夹可快速添加", bg=COLOR_CARD_BG, fg=COLOR_TEXT_SUB, font=("Microsoft YaHei", 8)).pack(side="bottom", pady=20)
 
-        # === 下半部分：日志 ===
-        log_frame = ttk.LabelFrame(main_container, text=" 运行日志 ", style="Log.TLabelframe", padding=(2, 2, 2, 2))
-        log_frame.pack(fill="both", expand=True, pady=(20, 0))
-        # 限制日志高度
-        log_frame.config(height=180) 
 
-        self.log_text = tk.Text(
-            log_frame,
-            height=8,
-            bg=COLOR_CONSOLE_BG,
-            fg=COLOR_CONSOLE_FG,
-            font=("Consolas", 10),
-            state="disabled",
-            relief="flat",
-            padx=10,
-            pady=10,
-            insertbackground="white" # 光标颜色
-        )
+        # ---------------------------------------------------------
+        # 底部日志
+        # ---------------------------------------------------------
+        log_frame = tk.Frame(root, bg=COLOR_LOG_BG, height=160)
+        log_frame.pack(side="bottom", fill="x")
+        log_frame.pack_propagate(False)
+
+        log_header = tk.Frame(log_frame, bg="#2D2D2D", height=24)
+        log_header.pack(fill="x")
+        tk.Label(log_header, text=" 📄 运行日志", bg="#2D2D2D", fg="#909399", font=("Consolas", 9)).pack(side="left")
+
+        self.log_text = tk.Text(log_frame, bg=COLOR_LOG_BG, fg=COLOR_LOG_FG,
+                                font=("Consolas", 10), relief="flat", padx=10, pady=5, state="disabled")
         self.log_text.pack(fill="both", expand=True)
 
         self._schedule_log_drain()
 
+    # 辅助方法：创建统一大小的文字按钮
+    def _create_icon_btn(self, parent, text, command):
+        # width=10 确保按钮宽度一致
+        btn = tk.Button(parent, text=text, font=("Microsoft YaHei", 9), width=10,
+                        bg="#F2F3F5", fg=COLOR_TEXT_MAIN, # 浅灰背景让按钮更像按钮
+                        activebackground="#E4E6E8", activeforeground=COLOR_BTN_BLUE,
+                        relief="flat", cursor="hand2", command=command)
+        btn.pack(side="right", padx=5)
+
     def _setup_styles(self):
         style = ttk.Style()
         try:
-            style.theme_use("clam") # clam 引擎最容易自定义颜色
+            style.theme_use("clam")
         except:
             pass
         
-        # 通用背景
-        style.configure("Main.TFrame", background=COLOR_BG)
-        style.configure("Card.TFrame", background=COLOR_WHITE, relief="flat") # 右侧卡片背景
-
-        # Label 样式
-        style.configure("TLabel", background=COLOR_BG, foreground=COLOR_TEXT, font=("Microsoft YaHei", 10))
-        style.configure("Param.TLabel", background=COLOR_WHITE, foreground=COLOR_TEXT)
-        style.configure("Custom.TCheckbutton", background=COLOR_WHITE, foreground=COLOR_TEXT, font=("Microsoft YaHei", 10))
-
-        # --- 按钮样式 ---
-        # 1. 主要按钮 (Primary - Blue)
-        style.configure("Primary.TButton",
-                        font=("Microsoft YaHei", 11, "bold"),
-                        background=COLOR_PRIMARY,
-                        foreground="white",
-                        borderwidth=0,
-                        focuscolor=COLOR_PRIMARY)
-        style.map("Primary.TButton",
-                  background=[("active", COLOR_PRIMARY_HOVER), ("disabled", "#9CA3AF")])
-
-        # 2. 危险按钮 (Danger - Red)
-        style.configure("Danger.TButton",
-                        font=("Microsoft YaHei", 11),
-                        background=COLOR_DANGER,
-                        foreground="white",
-                        borderwidth=0,
-                        focuscolor=COLOR_DANGER)
-        style.map("Danger.TButton",
-                  background=[("active", COLOR_DANGER_HOVER), ("disabled", "#FCA5A5")])
-
-        # 3. 次要按钮 (Secondary - White/Gray)
-        style.configure("Secondary.TButton",
+        # 树形列表样式
+        style.configure("Custom.Treeview", 
+                        background="white",
+                        fieldbackground="white",
+                        foreground=COLOR_TEXT_MAIN,
                         font=("Microsoft YaHei", 10),
-                        background=COLOR_WHITE,
-                        foreground=COLOR_TEXT,
-                        borderwidth=1,
-                        bordercolor="#D1D5DB",
-                        relief="solid")
-        style.map("Secondary.TButton",
-                  background=[("active", "#F3F4F6"), ("pressed", "#E5E7EB")])
-
-        # --- Treeview 表格样式 ---
-        style.configure("Treeview", 
-                        background=COLOR_WHITE,
-                        fieldbackground=COLOR_WHITE,
-                        foreground=COLOR_TEXT,
-                        font=("Microsoft YaHei", 10),
-                        rowheight=30, # 增加行高
+                        rowheight=32,
                         borderwidth=0)
-        style.map("Treeview", background=[("selected", "#E0F2FE")], foreground=[("selected", COLOR_PRIMARY)])
         
-        style.configure("Treeview.Heading", 
-                        font=("Microsoft YaHei", 10, "bold"),
-                        background="#F3F4F6", 
-                        foreground=COLOR_TEXT,
-                        relief="flat")
-
-        # --- 进度条 ---
-        style.configure("Thinking.Horizontal.TProgressbar",
-                        troughcolor="#E5E7EB",
-                        background=COLOR_PRIMARY,
-                        bordercolor="#E5E7EB",
-                        lightcolor=COLOR_PRIMARY, 
-                        darkcolor=COLOR_PRIMARY)
+        # 表头样式：加深颜色，加粗，凸起效果(relief='raised')模拟边框
+        style.configure("Custom.Treeview.Heading", 
+                        font=("Microsoft YaHei", 9, "bold"),
+                        background=COLOR_HEADER_BG, # 更深的灰
+                        foreground="#303133",
+                        relief="raised") # 模拟按钮凸起，增加分割感
         
-        # --- LabelFrame ---
-        style.configure("Log.TLabelframe", background=COLOR_BG, bordercolor=COLOR_BORDER)
-        style.configure("Log.TLabelframe.Label", background=COLOR_BG, foreground=COLOR_TEXT_LIGHT, font=("Microsoft YaHei", 9))
+        style.map("Custom.Treeview", background=[("selected", "#ECF5FF")], foreground=[("selected", COLOR_TEXT_MAIN)])
 
     def center_window(self, width, height):
         screen_width = self.root.winfo_screenwidth()
@@ -306,17 +275,10 @@ class VideoUploaderGUI:
         y = (screen_height - height) // 2
         self.root.geometry(f"{width}x{height}+{x}+{y}")
 
-    def create_context_menu(self):
-        self.menu = tk.Menu(self.root, tearoff=0, bg="white", fg=COLOR_TEXT, relief="flat", font=("Microsoft YaHei", 10))
-        self.menu.add_command(label="➕ 添加文件", command=self.add_file)
-        self.menu.add_separator()
-        self.menu.add_command(label="❌ 删除选中", command=self.delete_selected)
-        self.tree.bind("<Button-3>", self.show_context_menu)
-
-    # 日志
+    # ================= 业务逻辑 =================
     def log(self, msg):
-        t = time.strftime("%H:%M:%S")
-        self.log_q.put(f"[{t}] {msg}")
+        t = time.strftime("[%H:%M:%S]")
+        self.log_q.put(f"{t} {msg}")
 
     def _schedule_log_drain(self):
         while not self.log_q.empty():
@@ -327,7 +289,6 @@ class VideoUploaderGUI:
             self.log_text.config(state="disabled")
         self.root.after(120, self._schedule_log_drain)
 
-    # 拖拽事件
     def on_drop(self, event):
         paths = self.root.tk.splitlist(event.data)
         new_files = []
@@ -346,307 +307,190 @@ class VideoUploaderGUI:
         self.refresh_table()
         self.log(f"拖拽添加 {len(new_files)} 个文件")
 
-    # 右键菜单
     def show_context_menu(self, event):
         row_id = self.tree.identify_row(event.y)
         if row_id:
-            # 如果点的不是当前选中的，就选中它
             if row_id not in self.tree.selection():
                 self.tree.selection_set(row_id)
-            self.menu.entryconfig("❌ 删除选中", state="normal")
-        else:
-            self.menu.entryconfig("❌ 删除选中", state="disabled")
-        self.menu.post(event.x_root, event.y_root)
+            self.menu.post(event.x_root, event.y_root)
 
     def add_file(self):
-        filetypes = [("视频文件", "*.mp4 *.mkv *.ts")]
-        fps = filedialog.askopenfilenames(title="选择视频文件", filetypes=filetypes) # 支持多选
+        fps = filedialog.askopenfilenames(title="选择视频", filetypes=[("视频文件", "*.mp4 *.mkv *.ts")])
         if fps:
             for fp in fps:
-                if fp.lower().endswith(VIDEO_EXTS):
-                    self.files.append(fp)
+                self.files.append(fp)
             self.files = list(dict.fromkeys(self.files))
             self.refresh_table()
             self.log(f"添加 {len(fps)} 个文件")
 
-    def delete_selected(self):
-        selected = self.tree.selection()
-        if not selected:
-            return
-        for iid in selected:
-            vals = self.tree.item(iid, "values")
-            if vals:
-                fp = vals[1]
-                if fp in self.files:
-                    self.files.remove(fp)
-                self.tree.delete(iid)
-        self.log(f"删除 {len(selected)} 个文件")
-
     def choose_dir(self):
-        d = filedialog.askdirectory(title="选择视频目录")
-        if not d:
-            return
-        self.files = []
+        d = filedialog.askdirectory(title="选择目录")
+        if not d: return
+        cnt = 0
         for rootdir, _, filenames in os.walk(d):
             for fn in filenames:
                 if fn.lower().endswith(VIDEO_EXTS):
                     self.files.append(os.path.join(rootdir, fn))
-        self.files.sort(key=lambda x: os.path.basename(x).lower())
+                    cnt += 1
         self.refresh_table()
-        self.log(f"已加载目录，共 {len(self.files)} 个视频")
+        self.log(f"目录添加 {cnt} 个文件")
 
-    def refresh_table(self):
-        for item in self.tree.get_children():
-            self.tree.delete(item)
-        for idx, fp in enumerate(self.files):
-            name = os.path.basename(fp)
-            # 奇偶行颜色交替由Treeview style处理，这里直接插
-            self.tree.insert("", "end", values=(name, fp, "等待处理"))
+    def delete_selected(self):
+        selected = self.tree.selection()
+        for iid in selected:
+            vals = self.tree.item(iid, "values")
+            if vals and vals[1] in self.files:
+                self.files.remove(vals[1])
+            self.tree.delete(iid)
 
     def clear_data(self):
         self.files = []
         self.refresh_table()
         self.log("列表已清空")
 
+    def refresh_table(self):
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        for i, fp in enumerate(self.files):
+            # 交替斑马纹
+            tag = "evenrow" if i % 2 == 0 else "oddrow"
+            self.tree.insert("", "end", values=(os.path.basename(fp), fp, "等待中"), tags=(tag,))
+
     def exit_app(self):
         if self.is_running:
-            if not messagebox.askyesno("确认退出", "任务正在进行中，强制退出可能导致数据不完整。\n确定要退出吗？"):
-                return
+            if not messagebox.askyesno("警告", "任务进行中，确定退出？"): return
         self.root.destroy()
 
     def start_process(self):
-        if self.is_running:
-            return
-        if not self.files:
-            messagebox.showwarning("提示", "列表为空，请先添加视频文件。")
+        if self.is_running or not self.files:
+            if not self.files: messagebox.showwarning("提示", "请先添加文件")
             return
         try:
-            seg = int(self.seg_entry.get().strip())
-            thr = int(self.thr_entry.get().strip())
-            if seg <= 0 or thr <= 0:
-                raise ValueError()
-        except ValueError:
-            messagebox.showwarning("参数错误", "切片间隔和线程数必须为正整数。")
-            return
-
+            seg = int(self.seg_entry.get())
+            thr = int(self.thr_entry.get())
+        except: return
+        
         self.is_running = True
-        self.start_btn.state(["disabled"])
-        self.stop_btn.state(["!disabled"])
-        self.btn_add.state(["disabled"])
-        self.btn_clear.state(["disabled"])
-
-        self.progress["maximum"] = 1.0
-        self.progress["value"] = 0.0
+        self.start_btn.config(bg="#A0CFFF", state="disabled", cursor="arrow")
+        self.stop_btn.config(state="normal", bg=COLOR_BTN_RED, cursor="hand2")
+        self.progress["value"] = 0
         self.progress_label.config(text="0%")
-
-        t = threading.Thread(target=self._process_thread, args=(seg, thr), daemon=True)
-        t.start()
+        
+        threading.Thread(target=self._process_thread, args=(seg, thr), daemon=True).start()
 
     def stop_process(self):
-        messagebox.showinfo("提示", "程序逻辑当前不支持强行中断 FFmpeg/上传。\n请等待当前单个视频完成后，关闭程序重试。")
+        messagebox.showinfo("提示", "当前不支持强行中断，请等待当前文件完成")
 
-    def _process_thread(self, segment_seconds, upload_threads):
+    def _process_thread(self, seg, thr):
         total = len(self.files)
-        completed = 0
-        all_videos_success = True
+        for i, fp in enumerate(self.files):
+            base = os.path.splitext(os.path.basename(fp))[0]
+            self._update_status(fp, "⚡ 切片中")
+            self._focus_row(fp)
+            
+            ok = self._process_single(fp, base, seg, thr)
+            self._update_status(fp, "✅ 完成" if ok else "❌ 失败")
+            
+            ratio = (i + 1) / total * 100
+            self.root.after(0, lambda r=ratio: (self.progress.configure(value=r), self.progress_label.config(text=f"{int(r)}%")))
         
-        self.log("-" * 40)
-        self.log(f"任务开始：共 {total} 个视频")
+        self.log("全部任务完成")
+        if self.after_delete_var.get():
+             try:
+                 import shutil
+                 shutil.rmtree(OUTPUT_DIR)
+                 self.log("已清理切片目录")
+             except: pass
+        if self.after_shutdown_var.get(): shutdown_windows()
+        
+        self.is_running = False
+        self.root.after(0, self._reset_btn)
 
-        try:
-            for fp in self.files:
-                base = os.path.splitext(os.path.basename(fp))[0]
-                self._set_row_status(fp, "⚡ 切片中...")
-                
-                # 滚动到当前行
-                self._focus_row(fp)
+    def _reset_btn(self):
+        self.start_btn.config(bg=COLOR_BTN_BLUE, state="normal", cursor="hand2")
+        self.stop_btn.config(bg=COLOR_BTN_RED, state="disabled", cursor="arrow")
 
-                ok = self._process_single_video(fp, base, segment_seconds, upload_threads)
-                if not ok:
-                    self._set_row_status(fp, "❌ 失败")
-                    all_videos_success = False
-                else:
-                    self._set_row_status(fp, "✅ 完成")
-                
-                completed += 1
-                ratio = completed / total
-                self.root.after(0, lambda r=ratio: (self.progress.configure(value=r),
-                                                    self.progress_label.config(text=f"{r:.0%}")))
-            else:
-                self.log("所有任务队列执行完毕")
-                messagebox.showinfo("完成", "全部视频处理完成！")
+    def _update_status(self, fp, status):
+        self.root.after(0, lambda: self._tree_set(fp, status))
 
-                if self.after_delete_var.get() and all_videos_success:
-                    try:
-                        import shutil
-                        shutil.rmtree(OUTPUT_DIR)
-                        self.log(f"清理临时目录：{OUTPUT_DIR}")
-                    except Exception as e:
-                        self.log(f"清理失败：{e}")
-
-                if self.after_shutdown_var.get():
-                    self.log("准备关机...")
-                    shutdown_windows()
-        finally:
-            self.is_running = False
-            self.root.after(0, self._reset_ui_state)
-
-    def _reset_ui_state(self):
-        self.start_btn.state(["!disabled"])
-        self.stop_btn.state(["disabled"])
-        self.btn_add.state(["!disabled"])
-        self.btn_clear.state(["!disabled"])
-
-    def _focus_row(self, file_path):
+    def _tree_set(self, fp, status):
         for iid in self.tree.get_children():
-            vals = self.tree.item(iid, "values")
-            if vals and vals[1] == file_path:
-                self.tree.see(iid)
-                self.tree.selection_set(iid)
-                break
+            if self.tree.item(iid, "values")[1] == fp:
+                self.tree.item(iid, values=(os.path.basename(fp), fp, status))
 
-    # 单视频处理逻辑 (FFmpeg + Upload)
-    def _process_single_video(self, input_file, base, segment_seconds, upload_threads):
+    def _focus_row(self, fp):
+        for iid in self.tree.get_children():
+            if self.tree.item(iid, "values")[1] == fp:
+                self.root.after(0, lambda: self.tree.see(iid))
+                self.root.after(0, lambda: self.tree.selection_set(iid))
+
+    def _process_single(self, input_file, base, seg, thr):
         video_dir = os.path.join(OUTPUT_DIR, base)
         os.makedirs(video_dir, exist_ok=True)
-
-        playlist_path = os.path.join(M3U8_DIR, f"{base}.m3u8")
-        ts_pattern = os.path.join(video_dir, "%03d.ts")
-        tmp_playlist = os.path.join(video_dir, f"{base}.m3u8")
-
-        # 1. 切片
-        ffmpeg_cmd = [
-            "ffmpeg", "-y",
-            "-i", input_file,
-            "-c", "copy",
-            "-map", "0",
-            "-f", "segment",
-            "-segment_time", str(segment_seconds),
-            "-segment_list", tmp_playlist,
-            ts_pattern
-        ]
-        self.log(f"正在切片：{base}")
+        
+        cmd = ["ffmpeg", "-y", "-i", input_file, "-c", "copy", "-map", "0", "-f", "segment", "-segment_time", str(seg), "-segment_list", os.path.join(video_dir, f"{base}.m3u8"), os.path.join(video_dir, "%03d.ts")]
+        
+        self.log(f"开始切片: {base}")
         try:
-            # startupinfo 用于隐藏 Windows 下的 ffmpeg 黑框
             startupinfo = None
             if os.name == 'nt':
                 startupinfo = subprocess.STARTUPINFO()
                 startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                
-            subprocess.run(ffmpeg_cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, startupinfo=startupinfo)
-        except FileNotFoundError:
-            self.log("❌ 错误：未找到 ffmpeg，请检查环境变量。")
-            return False
-        except subprocess.CalledProcessError as e:
-            self.log(f"❌ 切片出错：{e}")
-            return False
+            subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, startupinfo=startupinfo)
         except Exception as e:
-            self.log(f"❌ 未知错误：{e}")
+            self.log(f"切片失败: {e}")
             return False
 
         ts_files = sorted([f for f in os.listdir(video_dir) if f.endswith(".ts")])
-        if not ts_files:
-            self.log("❌ 切片后未发现 TS 文件")
-            return False
-
-        # 2. 上传
-        urls = {}
-        uploaded_count = 0
-        all_success = True
-        total_ts = len(ts_files)
-
-        def on_piece_uploaded(fname):
-            nonlocal uploaded_count
-            uploaded_count += 1
-            percent = int((uploaded_count / total_ts) * 100)
-            self._set_row_status(input_file, f"上传 {percent}%")
-            self.log(f"上传进度 [{uploaded_count}/{total_ts}]: {fname}")
-
-        self._set_row_status(input_file, "🚀 上传中...")
+        if not ts_files: return False
         
-        with ThreadPoolExecutor(max_workers=upload_threads) as ex:
-            futures = {ex.submit(self._upload_with_retry, os.path.join(video_dir, fname)): fname for fname in ts_files}
-            for fut in as_completed(futures):
-                fname = futures[fut]
+        self._update_status(input_file, "☁ 上传中")
+        urls = {}
+        done = 0
+        total = len(ts_files)
+        
+        def _u(fpath):
+            for _ in range(3):
+                try: return upload_file(fpath)
+                except: time.sleep(1)
+            raise Exception("Fail")
+
+        with ThreadPoolExecutor(thr) as pool:
+            futs = {pool.submit(_u, os.path.join(video_dir, f)): f for f in ts_files}
+            for f in as_completed(futs):
+                name = futs[f]
                 try:
-                    url, _ = fut.result()
-                    urls[fname] = url
-                    self.root.after(0, lambda n=fname: on_piece_uploaded(n))
-                except Exception:
-                    self.log(f"❌ 文件最终上传失败：{fname}")
-                    all_success = False
-
-        # 3. 生成 m3u8
-        if not os.path.exists(tmp_playlist):
-             self.log("❌ 原始 m3u8 文件丢失")
-             return False
-
+                    urls[name] = f.result()
+                    done += 1
+                    percent = int(done/total*100)
+                    self._update_status(input_file, f"☁ {percent}%")
+                    self.log(f"上传成功 [{percent}%]: {name}")
+                except: pass
+        
+        lines = []
         try:
-            with open(tmp_playlist, "r", encoding="utf-8") as f:
-                lines = f.readlines()
+            with open(os.path.join(video_dir, f"{base}.m3u8"), "r", encoding="utf-8") as f:
+                for line in f:
+                    t = line.strip()
+                    if t in urls: lines.append(urls[t]+"\n")
+                    else: lines.append(line)
+            with open(os.path.join(M3U8_DIR, f"{base}.m3u8"), "w", encoding="utf-8") as f:
+                f.writelines(lines)
             
-            new_lines = []
-            for line in lines:
-                text = line.strip()
-                if text.endswith(".ts"):
-                    if text in urls:
-                        new_lines.append(urls[text] + "\n")
-                    else:
-                        # 失败的保留原样或做标记
-                        new_lines.append(line) 
-                else:
-                    new_lines.append(line)
-            
-            with open(playlist_path, "w", encoding="utf-8") as f:
-                f.writelines(new_lines)
-            self.log(f"✨ m3u8 生成完毕：{playlist_path}")
-        except Exception as e:
-            self.log(f"❌ 写 m3u8 失败：{e}")
-            return False
-
-        # 4. 清理子文件夹
-        if self.after_delete_var.get() and all_success:
-            try:
-                for f in ts_files:
-                    os.remove(os.path.join(video_dir, f))
-                if os.path.exists(tmp_playlist):
-                    os.remove(tmp_playlist)
-                os.rmdir(video_dir)
-                self.log(f"已清理临时切片：{base}")
-            except Exception as e:
-                self.log(f"清理临时文件出错：{e}")
-
-        return all_success
-
-    def _upload_with_retry(self, file_path, max_attempts=3):
-        for attempt in range(1, max_attempts + 1):
-            try:
-                url = upload_file(file_path)
-                return url, attempt
-            except Exception as e:
-                if attempt == max_attempts:
-                    raise e
-                time.sleep(1.0) # 失败等待1秒
-
-    def _set_row_status(self, file_path, status):
-        # 在主线程更新UI
-        self.root.after(0, lambda: self._update_tree_item(file_path, status))
-
-    def _update_tree_item(self, file_path, status):
-        for iid in self.tree.get_children():
-            vals = self.tree.item(iid, "values")
-            if vals and vals[1] == file_path:
-                self.tree.item(iid, values=(vals[0], vals[1], status))
-                break
+            if self.after_delete_var.get():
+                try:
+                    for f in ts_files: os.remove(os.path.join(video_dir, f))
+                    os.rmdir(video_dir)
+                except: pass
+            return True
+        except: return False
 
 if __name__ == "__main__":
-    # 高分屏适配 (Windows)
     try:
         from ctypes import windll
         windll.shcore.SetProcessDpiAwareness(1)
-    except:
-        pass
-
+    except: pass
+    
     root = TkinterDnD.Tk()
     app = VideoUploaderGUI(root)
     root.mainloop()
