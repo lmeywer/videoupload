@@ -69,7 +69,6 @@ def upload_file(file_path):
     return "https://img1.freeforever.club" + src
 
 def ensure_m3u8_dir():
-    # 只预先创建m3u8目录，切片目录在开始处理时创建
     os.makedirs(M3U8_DIR, exist_ok=True)
 
 # ================= GUI 界面类 =================
@@ -113,12 +112,10 @@ class VideoUploaderGUI:
         self._create_outline_btn(btn_box, "📂 添加目录", self.choose_dir)
 
         # 2. 表格区域
-        # 【关键修复】蓝色容器只负责显示1px的蓝色边框
         table_border = tk.Frame(left_card, bg=COLOR_BORDER_BLUE, padx=1, pady=1)
         table_border.pack(fill="both", expand=True, padx=15, pady=(0, 15))
 
         columns = ("name", "path", "status")
-        # 【关键修复】bd=0 去除Treeview自身边框，避免与外层蓝色重叠
         self.tree = ttk.Treeview(table_border, columns=columns, show="headings", 
                                  selectmode="extended", style="Custom.Treeview", bd=0)
         
@@ -155,7 +152,8 @@ class VideoUploaderGUI:
                                         style="Blue.Horizontal.TProgressbar")
         self.progress.pack(side="left", fill="x", expand=True, padx=5, pady=12)
         
-        self.progress_label = tk.Label(footer_frame, text="0%", bg="#FAFAFA", fg="black", 
+        # 精度显示 Label
+        self.progress_label = tk.Label(footer_frame, text="0.00%", bg="#FAFAFA", fg="black", 
                                        font=("Microsoft YaHei", 9, "bold"))
         self.progress_label.pack(side="right", padx=(5, 15), pady=12)
 
@@ -174,7 +172,6 @@ class VideoUploaderGUI:
         form_frame = tk.Frame(right_card, bg=COLOR_CARD_BG)
         form_frame.pack(fill="x", padx=20)
 
-        # 输入框配置：居中，蓝色边框，无焦点变色
         entry_conf = {
             "font": ("Microsoft YaHei", 10),
             "highlightbackground": COLOR_BORDER_BLUE,
@@ -194,35 +191,30 @@ class VideoUploaderGUI:
         self.thr_entry.insert(0, str(DEFAULT_UPLOAD_THREADS))
         self.thr_entry.grid(row=1, column=1, sticky="e", pady=8)
 
-        # 分割线
         tk.Frame(right_card, bg=COLOR_BORDER_BLUE, height=1).pack(fill="x", padx=20, pady=20)
 
         # === 按钮区域 ===
-        # 1. 开始处理
         self.start_btn = tk.Button(right_card, text="▶ 开始处理", bg=COLOR_BTN_START, fg="white",
                                    font=("Microsoft YaHei", 12, "bold"), relief="flat",
                                    activebackground=COLOR_BTN_START_HOVER, activeforeground="white",
                                    cursor="hand2", command=self.start_process)
         self.start_btn.pack(fill="x", padx=20, pady=(5, 10), ipady=8)
 
-        # 2. 停止任务
         self.stop_btn = tk.Button(right_card, text="■ 停止任务", bg=COLOR_BTN_STOP, fg="white",
                                   font=("Microsoft YaHei", 12, "bold"), relief="flat",
                                   activebackground=COLOR_BTN_STOP_HOVER, activeforeground="white",
                                   state="disabled", cursor="arrow", command=self.stop_process)
         self.stop_btn.pack(fill="x", padx=20, pady=(0, 10), ipady=8)
 
-        # 3. 退出程序 (修复：白底，灰色实线边框，不同于外围蓝色)
         tk.Button(right_card, text="退出程序", bg="white", fg="black",
                   font=("Microsoft YaHei", 10), 
-                  relief="solid", bd=1,             # 灰色细实线边框
+                  relief="solid", bd=1,
                   activebackground="#f2f2f2", 
                   cursor="hand2",
                   command=self.exit_app).pack(fill="x", padx=20, pady=(10, 10), ipady=4)
 
         tk.Label(right_card, text="提示: 拖拽文件夹可快速添加", bg=COLOR_CARD_BG, fg="#909399", 
                  font=("Microsoft YaHei", 8)).pack(side="bottom", pady=20)
-
 
         # ---------------------------------------------------------
         # 底部日志
@@ -260,18 +252,14 @@ class VideoUploaderGUI:
         except:
             pass
         
-        # 树形列表样式
         style.configure("Custom.Treeview", 
                         background="white",
                         fieldbackground="white",
                         foreground="black",
                         font=("Microsoft YaHei", 10),
                         rowheight=32,
-                        borderwidth=0) # 关键：去边框
+                        borderwidth=0)
         
-        # 【关键修复】表头样式：
-        # relief="flat" 去除灰色框，避免与外层蓝框重叠
-        # background="#E1E4E8" 加深背景色，区分表头与内容
         style.configure("Custom.Treeview.Heading", 
                         font=("Microsoft YaHei", 9, "bold"),
                         background="#e1e4e8", 
@@ -279,12 +267,11 @@ class VideoUploaderGUI:
                         relief="flat")
         
         style.map("Custom.Treeview.Heading", 
-                  background=[("active", "#e1e4e8")], # 移入不变色
+                  background=[("active", "#e1e4e8")],
                   foreground=[("active", "#303133")])
         
         style.map("Custom.Treeview", background=[("selected", "#cce5ff")], foreground=[("selected", "black")])
 
-        # 蓝色进度条
         style.configure("Blue.Horizontal.TProgressbar",
                         troughcolor="#E6E6E6",
                         background=COLOR_PROG_BAR,
@@ -393,33 +380,55 @@ class VideoUploaderGUI:
             thr = int(self.thr_entry.get())
         except: return
 
-        # 逻辑修改：点击开始后才创建目录
         os.makedirs(OUTPUT_DIR, exist_ok=True)
         
         self.is_running = True
         self.start_btn.config(state="disabled", bg="#a0cfff") 
         self.stop_btn.config(state="normal", bg=COLOR_BTN_STOP)
         self.progress["value"] = 0
-        self.progress_label.config(text="0%")
+        self.progress_label.config(text="0.00%")
         
         threading.Thread(target=self._process_thread, args=(seg, thr), daemon=True).start()
 
     def stop_process(self):
         messagebox.showinfo("提示", "当前不支持强行中断，请等待当前文件完成")
 
+    # ================= 修改后的核心处理逻辑 =================
     def _process_thread(self, seg, thr):
-        total = len(self.files)
+        # 1. 计算总大小（字节）
+        total_size = 0
+        for fp in self.files:
+            try:
+                total_size += os.path.getsize(fp)
+            except: pass
+        
+        if total_size == 0: total_size = 1 # 防止除以0
+        
+        current_base_progress = 0.0 # 已完成文件的总权重进度
+
+        self.log(f"开始任务，总大小: {total_size/1024/1024:.2f} MB")
+
         for i, fp in enumerate(self.files):
+            # 计算当前文件的权重 (0.0 - 1.0)
+            file_size = 0
+            try: file_size = os.path.getsize(fp)
+            except: pass
+            
+            file_weight = file_size / total_size
+
             base = os.path.splitext(os.path.basename(fp))[0]
             self._update_status(fp, "⚡ 切片中")
             self._focus_row(fp)
             
-            ok = self._process_single(fp, base, seg, thr)
+            # 传入权重参数
+            ok = self._process_single(fp, base, seg, thr, file_weight, current_base_progress)
             self._update_status(fp, "✅ 完成" if ok else "❌ 失败")
             
-            ratio = (i + 1) / total * 100
-            self.root.after(0, lambda r=ratio: (self.progress.configure(value=r), self.progress_label.config(text=f"{int(r)}%")))
-        
+            # 文件完成后，将该文件的权重完全加到基础进度中
+            current_base_progress += file_weight
+            # 确保 UI 更新到这一阶段的满额
+            self._update_progress_ui(current_base_progress * 100)
+
         self.log("全部任务完成")
         
         try:
@@ -450,7 +459,15 @@ class VideoUploaderGUI:
                 self.root.after(0, lambda: self.tree.see(iid))
                 self.root.after(0, lambda: self.tree.selection_set(iid))
 
-    def _process_single(self, input_file, base, seg, thr):
+    # 更新总进度条UI
+    def _update_progress_ui(self, val):
+        if val > 100: val = 100
+        self.root.after(0, lambda v=val: (
+            self.progress.configure(value=v),
+            self.progress_label.config(text=f"{v:.2f}%")
+        ))
+
+    def _process_single(self, input_file, base, seg, thr, file_weight, base_progress):
         video_dir = os.path.join(OUTPUT_DIR, base)
         os.makedirs(video_dir, exist_ok=True)
         
@@ -472,9 +489,11 @@ class VideoUploaderGUI:
         
         self._update_status(input_file, "☁ 上传中")
         urls = {}
-        done = 0
-        total = len(ts_files)
         
+        total_ts = len(ts_files)
+        uploaded_ts_count = 0
+        lock = threading.Lock() # 线程锁，防止计数冲突
+
         def _u(fpath):
             for _ in range(3):
                 try: return upload_file(fpath)
@@ -486,11 +505,27 @@ class VideoUploaderGUI:
             for f in as_completed(futs):
                 name = futs[f]
                 try:
-                    urls[name] = f.result()
-                    done += 1
-                    percent = int(done/total*100)
-                    self._update_status(input_file, f"☁ {percent}%")
-                    self.log(f"上传成功 [{percent}%]: {name}")
+                    url = f.result()
+                    urls[name] = url
+                    
+                    with lock:
+                        uploaded_ts_count += 1
+                        # === 关键算法 ===
+                        # 1. 当前文件已上传比例 (0.0 - 1.0)
+                        file_progress = uploaded_ts_count / total_ts
+                        # 2. 当前文件对总进度的贡献 = 文件权重 * 文件进度
+                        file_contribution = file_weight * file_progress
+                        # 3. 总进度 = 之前文件的进度 + 当前文件贡献
+                        total_percent = (base_progress + file_contribution) * 100
+                        
+                        # 更新UI
+                        self._update_progress_ui(total_percent)
+                        
+                        # 更新表格里的状态
+                        percent_str = int(file_progress * 100)
+                        self._update_status(input_file, f"☁ {percent_str}%")
+                    
+                    self.log(f"上传成功 [{uploaded_ts_count}/{total_ts}]: {name}")
                 except: pass
         
         lines = []
