@@ -116,7 +116,6 @@ class VideoUploaderGUI:
         table_border.pack(fill="both", expand=True, padx=15, pady=(0, 15))
 
         columns = ("name", "path", "status")
-        # bd=0 去除 Treeview 自身边框
         self.tree = ttk.Treeview(table_border, columns=columns, show="headings", 
                                  selectmode="extended", style="Custom.Treeview")
         
@@ -153,6 +152,7 @@ class VideoUploaderGUI:
                                         style="Blue.Horizontal.TProgressbar")
         self.progress.pack(side="left", fill="x", expand=True, padx=5, pady=12)
         
+        # 精度显示 Label
         self.progress_label = tk.Label(footer_frame, text="0.00%", bg="#FAFAFA", fg="black", 
                                        font=("Microsoft YaHei", 9, "bold"))
         self.progress_label.pack(side="right", padx=(5, 15), pady=12)
@@ -194,13 +194,13 @@ class VideoUploaderGUI:
         tk.Frame(right_card, bg=COLOR_BORDER_BLUE, height=1).pack(fill="x", padx=20, pady=20)
 
         # === 按钮区域 ===
-        self.start_btn = tk.Button(right_card, text="▶ 开始处理", bg=COLOR_BTN_START, fg="white",
+        self.start_btn = tk.Button(right_card, text="开始处理", bg=COLOR_BTN_START, fg="white",
                                    font=("Microsoft YaHei", 12, "bold"), relief="flat",
                                    activebackground=COLOR_BTN_START_HOVER, activeforeground="white",
                                    cursor="hand2", command=self.start_process)
         self.start_btn.pack(fill="x", padx=20, pady=(5, 10), ipady=8)
 
-        self.stop_btn = tk.Button(right_card, text="■ 停止任务", bg=COLOR_BTN_STOP, fg="white",
+        self.stop_btn = tk.Button(right_card, text="停止任务", bg=COLOR_BTN_STOP, fg="white",
                                   font=("Microsoft YaHei", 12, "bold"), relief="flat",
                                   activebackground=COLOR_BTN_STOP_HOVER, activeforeground="white",
                                   state="disabled", cursor="arrow", command=self.stop_process)
@@ -308,11 +308,9 @@ class VideoUploaderGUI:
                 for fn in os.listdir(p):
                     full = os.path.join(p, fn)
                     if os.path.isfile(full) and fn.lower().endswith(VIDEO_EXTS):
-                        # 【修改】使用 normpath 统一路径分隔符
                         new_files.append(os.path.normpath(full))
             else:
                 if p.lower().endswith(VIDEO_EXTS):
-                    # 【修改】使用 normpath 统一路径分隔符
                     new_files.append(os.path.normpath(p))
         new_files.sort(key=lambda x: os.path.basename(x).lower())
         self.files.extend(new_files)
@@ -320,18 +318,29 @@ class VideoUploaderGUI:
         self.refresh_table()
         self.log(f"拖拽添加 {len(new_files)} 个文件")
 
+    # 【修改】右键菜单 - 检测 ☁ 状态
     def show_context_menu(self, event):
         row_id = self.tree.identify_row(event.y)
         if row_id:
             if row_id not in self.tree.selection():
                 self.tree.selection_set(row_id)
+            
+            if self.is_running:
+                return
+
+            vals = self.tree.item(row_id, "values")
+            status = vals[2]
+            
+            # 检测符号: ⚡=切片中, ☁=上传中, ✅=完成
+            if "⚡" in status or "☁" in status or "✅" in status:
+                return
+            
             self.menu.post(event.x_root, event.y_root)
 
     def add_file(self):
         fps = filedialog.askopenfilenames(title="选择视频", filetypes=[("视频文件", "*.mp4 *.mkv *.ts")])
         if fps:
             for fp in fps:
-                # 【修改】使用 normpath 统一路径分隔符
                 self.files.append(os.path.normpath(fp))
             self.files = list(dict.fromkeys(self.files))
             self.refresh_table()
@@ -344,22 +353,49 @@ class VideoUploaderGUI:
         for rootdir, _, filenames in os.walk(d):
             for fn in filenames:
                 if fn.lower().endswith(VIDEO_EXTS):
-                    # 【修改】os.path.join 本身就会使用系统分隔符，再套一层 normpath 确保万无一失
                     full_path = os.path.normpath(os.path.join(rootdir, fn))
                     self.files.append(full_path)
                     cnt += 1
         self.refresh_table()
         self.log(f"目录添加 {cnt} 个文件")
 
+    # 【修改】删除逻辑 - 检测 ☁ 状态
     def delete_selected(self):
+        if self.is_running:
+            messagebox.showwarning("警告", "任务正在进行中，禁止删除文件！")
+            return
+
         selected = self.tree.selection()
+        if not selected:
+            return
+
+        to_delete_iids = []
+        protected_count = 0
+        
         for iid in selected:
+            vals = self.tree.item(iid, "values")
+            status = vals[2]
+            
+            # 检测符号
+            if "⚡" in status or "☁" in status or "✅" in status:
+                protected_count += 1
+                continue
+            
+            to_delete_iids.append(iid)
+
+        for iid in to_delete_iids:
             vals = self.tree.item(iid, "values")
             if vals and vals[1] in self.files:
                 self.files.remove(vals[1])
             self.tree.delete(iid)
+            
+        if protected_count > 0:
+            self.log(f"提示：已跳过 {protected_count} 个处理中/已完成的文件")
 
     def clear_data(self):
+        if self.is_running:
+            messagebox.showwarning("警告", "任务正在进行中，禁止清空列表！")
+            return
         self.files = []
         self.refresh_table()
         self.log("列表已清空")
@@ -485,7 +521,8 @@ class VideoUploaderGUI:
         ts_files = sorted([f for f in os.listdir(video_dir) if f.endswith(".ts")])
         if not ts_files: return False
         
-        self._update_status(input_file, "☁ 上传中")
+        # 【修改】使用 ☁，并显示“已上传 0%”
+        self._update_status(input_file, "☁ 已上传 0%")
         urls = {}
         
         total_ts = len(ts_files)
@@ -515,7 +552,8 @@ class VideoUploaderGUI:
                         self._update_progress_ui(total_percent)
                         
                         percent_str = int(file_progress * 100)
-                        self._update_status(input_file, f"☁ {percent_str}%")
+                        # 【修改】使用 ☁，显示“已上传 xx%”
+                        self._update_status(input_file, f"☁ 已上传 {percent_str}%")
                     
                     self.log(f"上传成功 [{uploaded_ts_count}/{total_ts}]: {name}")
                 except: pass
