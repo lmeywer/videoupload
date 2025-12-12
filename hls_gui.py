@@ -116,7 +116,7 @@ class VideoUploaderGUI:
         table_border.pack(fill="both", expand=True, padx=15, pady=(0, 15))
 
         columns = ("name", "path", "status")
-        # 【修复点】删除了 bd=0
+        # bd=0 去除 Treeview 自身边框
         self.tree = ttk.Treeview(table_border, columns=columns, show="headings", 
                                  selectmode="extended", style="Custom.Treeview")
         
@@ -153,7 +153,6 @@ class VideoUploaderGUI:
                                         style="Blue.Horizontal.TProgressbar")
         self.progress.pack(side="left", fill="x", expand=True, padx=5, pady=12)
         
-        # 精度显示 Label
         self.progress_label = tk.Label(footer_frame, text="0.00%", bg="#FAFAFA", fg="black", 
                                        font=("Microsoft YaHei", 9, "bold"))
         self.progress_label.pack(side="right", padx=(5, 15), pady=12)
@@ -253,7 +252,6 @@ class VideoUploaderGUI:
         except:
             pass
         
-        # 样式中已设置 borderwidth=0，无需在 __init__ 中设置 bd=0
         style.configure("Custom.Treeview", 
                         background="white",
                         fieldbackground="white",
@@ -310,10 +308,12 @@ class VideoUploaderGUI:
                 for fn in os.listdir(p):
                     full = os.path.join(p, fn)
                     if os.path.isfile(full) and fn.lower().endswith(VIDEO_EXTS):
-                        new_files.append(full)
+                        # 【修改】使用 normpath 统一路径分隔符
+                        new_files.append(os.path.normpath(full))
             else:
                 if p.lower().endswith(VIDEO_EXTS):
-                    new_files.append(p)
+                    # 【修改】使用 normpath 统一路径分隔符
+                    new_files.append(os.path.normpath(p))
         new_files.sort(key=lambda x: os.path.basename(x).lower())
         self.files.extend(new_files)
         self.files = list(dict.fromkeys(self.files))
@@ -331,7 +331,8 @@ class VideoUploaderGUI:
         fps = filedialog.askopenfilenames(title="选择视频", filetypes=[("视频文件", "*.mp4 *.mkv *.ts")])
         if fps:
             for fp in fps:
-                self.files.append(fp)
+                # 【修改】使用 normpath 统一路径分隔符
+                self.files.append(os.path.normpath(fp))
             self.files = list(dict.fromkeys(self.files))
             self.refresh_table()
             self.log(f"添加 {len(fps)} 个文件")
@@ -343,7 +344,9 @@ class VideoUploaderGUI:
         for rootdir, _, filenames in os.walk(d):
             for fn in filenames:
                 if fn.lower().endswith(VIDEO_EXTS):
-                    self.files.append(os.path.join(rootdir, fn))
+                    # 【修改】os.path.join 本身就会使用系统分隔符，再套一层 normpath 确保万无一失
+                    full_path = os.path.normpath(os.path.join(rootdir, fn))
+                    self.files.append(full_path)
                     cnt += 1
         self.refresh_table()
         self.log(f"目录添加 {cnt} 个文件")
