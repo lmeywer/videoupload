@@ -118,8 +118,9 @@ class VideoUploaderGUI:
         table_border.pack(fill="both", expand=True, padx=15, pady=(0, 15))
 
         columns = ("name", "path", "status")
+        # 【修复】删除了 bd=0
         self.tree = ttk.Treeview(table_border, columns=columns, show="headings", 
-                                 selectmode="extended", style="Custom.Treeview", bd=0)
+                                 selectmode="extended", style="Custom.Treeview")
         
         vsb = ttk.Scrollbar(table_border, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=vsb.set)
@@ -611,6 +612,8 @@ class VideoUploaderGUI:
                     with lock:
                         failed_segments += 1
         
+        self.log(f"{base} 上传完成")
+
         lines = []
         try:
             with open(os.path.join(video_dir, f"{base}.m3u8"), "r", encoding="utf-8") as f:
@@ -623,11 +626,9 @@ class VideoUploaderGUI:
         except Exception as e:
             self.log(f"{base} 写入M3U8失败: {e}", "ERR")
 
-        # === 关键：检查是否有失败 ===
         if failed_segments > 0:
             self.log(f"{base} 上传完成，但有 {failed_segments} 个切片失败，保留目录。", "WARN")
             self.failed_summary[base] = failed_segments
-            # 【修改】状态显示更明确
             self._update_status(input_file, f"{failed_segments}个ts上传失败")
             return False 
         else:
