@@ -328,10 +328,12 @@ class VideoUploaderGUI:
         if found_files:
             self._add_paths_to_list(found_files)
 
+    # 【修改重点】增量添加逻辑：不使用 refresh_table，而是直接 insert 新增项
     def _add_paths_to_list(self, paths):
         added_count = 0
         added_size = 0
-        
+        new_items = [] # 暂存新文件
+
         with self.data_lock:
             for p in paths:
                 p = os.path.normpath(p)
@@ -339,6 +341,7 @@ class VideoUploaderGUI:
                     if p not in self.files:
                         self.files.append(p)
                         added_count += 1
+                        new_items.append(p)
                         try:
                             fsize = os.path.getsize(p)
                             added_size += fsize
@@ -349,7 +352,15 @@ class VideoUploaderGUI:
                 if self.is_running:
                     self._calculate_and_update_global_progress()
                 
-                self.refresh_table()
+                # === 增量更新 UI ===
+                current_count = len(self.tree.get_children())
+                for i, fp in enumerate(new_items):
+                    # 计算斑马纹索引
+                    idx = current_count + i
+                    tag = "evenrow" if idx % 2 == 0 else "oddrow"
+                    self.tree.insert("", "end", values=(os.path.basename(fp), fp, "等待中"), tags=(tag,))
+                # ==================
+
                 self.log(f"添加 {added_count} 个文件 (共 {added_size/1024/1024:.1f} MB)")
 
     def show_context_menu(self, event):
@@ -541,7 +552,6 @@ class VideoUploaderGUI:
         
         cmd = ["ffmpeg", "-y", "-i", input_file, "-c", "copy", "-map", "0", "-f", "segment", "-segment_time", str(seg), "-segment_list", os.path.join(video_dir, f"{base}.m3u8"), os.path.join(video_dir, "%03d.ts")]
         
-        # 【修改】文件名放在前面
         self.log(f"{base} 开始切片")
         try:
             startupinfo = None
@@ -553,13 +563,11 @@ class VideoUploaderGUI:
             self.log(f"{base} 切片失败: {e}")
             return False
         
-        # 【修改】文件名放在前面
         self.log(f"{base} 切片完成")
 
         ts_files = sorted([f for f in os.listdir(video_dir) if f.endswith(".ts")])
         if not ts_files: return False
         
-        # 【修改】文件名放在前面
         self.log(f"{base} 开始上传")
         self._update_status(input_file, "☁ 已上传 0%")
         urls = {}
@@ -568,11 +576,19 @@ class VideoUploaderGUI:
         uploaded_ts_count = 0
         lock = threading.Lock()
 
+        # 带重试的上传逻辑
         def _u(fpath):
-            for _ in range(3):
-                try: return upload_file(fpath)
-                except: time.sleep(1)
-            raise Exception("Fail")
+            fname = os.path.basename(fpath)
+            max_retries = 3
+            for i in range(1, max_retries + 1):
+                try:
+                    return upload_file(fpath)
+                except Exception as e:
+                    if i < max_retries:
+                        self.log(f"⚠️ {fname} 上传失败，正在重试 ({i}/{max_retries-1})...")
+                        time.sleep(i)
+                    else:
+                        raise e
 
         with ThreadPoolExecutor(thr) as pool:
             futs = {pool.submit(_u, os.path.join(video_dir, f)): f for f in ts_files}
@@ -593,9 +609,9 @@ class VideoUploaderGUI:
                         self._update_status(input_file, f"☁ 已上传 {percent_str}%")
                     
                     self.log(f"{name} 上传成功")
-                except: pass
+                except Exception as e:
+                    self.log(f"❌ {name} 最终上传失败: {e}")
         
-        # 【修改】文件名放在前面
         self.log(f"{base} 上传完成")
 
         lines = []
