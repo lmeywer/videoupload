@@ -28,21 +28,17 @@ AUTHCODE = "97"
 VIDEO_EXTS = (".mp4", ".mkv", ".ts")
 
 # ================= 视觉配色 =================
-COLOR_BG_MAIN = "#F2F6FC"       # 窗口大背景
-COLOR_CARD_BG = "#FFFFFF"       # 卡片背景
-COLOR_BORDER_BLUE = "#3399ff"   # 核心蓝色边框
-COLOR_BORDER_GRAY = "#DCDFE6"   # 退出按钮/普通边框
+COLOR_BG_MAIN = "#F2F6FC"
+COLOR_CARD_BG = "#FFFFFF"
+COLOR_BORDER_BLUE = "#3399ff"
+COLOR_BORDER_GRAY = "#DCDFE6"
 
-# 按钮颜色
-COLOR_BTN_START = "#409EFF"     # 现代蓝
+COLOR_BTN_START = "#409EFF"
 COLOR_BTN_START_HOVER = "#66b1ff"
-COLOR_BTN_STOP = "#F56C6C"      # 现代红
+COLOR_BTN_STOP = "#F56C6C"
 COLOR_BTN_STOP_HOVER = "#f78989"
 
-# 进度条
 COLOR_PROG_BAR = "#3399ff"
-
-# 日志
 COLOR_LOG_BG = "#1E1E1E"
 COLOR_LOG_FG = "#00FF00"
 
@@ -85,19 +81,22 @@ class VideoUploaderGUI:
         self.files = []
         self.log_q = queue.Queue()
         self.is_running = False
+        
+        # === 动态进度核心变量 ===
+        self.data_lock = threading.Lock() # 线程锁
+        self.total_task_bytes = 0         # 所有任务总大小(字节)
+        self.finished_file_bytes = 0      # 已完成文件的总大小(字节)
+        self.current_processing_bytes = 0 # 当前正在处理的文件已上传大小(字节)
 
-        # === 主布局容器 ===
+        # === 主布局 ===
         top_container = tk.Frame(root, bg=COLOR_BG_MAIN)
         top_container.pack(side="top", fill="both", expand=True, padx=20, pady=20)
 
-        # ---------------------------------------------------------
-        # 左侧卡片：任务列表
-        # ---------------------------------------------------------
+        # 左侧
         left_card = tk.Frame(top_container, bg=COLOR_CARD_BG, 
                              highlightbackground=COLOR_BORDER_BLUE, highlightthickness=1)
         left_card.pack(side="left", fill="both", expand=True, padx=(0, 15))
 
-        # 1. 顶部工具栏
         header_frame = tk.Frame(left_card, bg=COLOR_CARD_BG, height=50)
         header_frame.pack(fill="x", padx=15, pady=15)
 
@@ -111,7 +110,6 @@ class VideoUploaderGUI:
         self._create_outline_btn(btn_box, "📄 添加文件", self.add_file)
         self._create_outline_btn(btn_box, "📂 添加目录", self.choose_dir)
 
-        # 2. 表格区域
         table_border = tk.Frame(left_card, bg=COLOR_BORDER_BLUE, padx=1, pady=1)
         table_border.pack(fill="both", expand=True, padx=15, pady=(0, 15))
 
@@ -141,7 +139,6 @@ class VideoUploaderGUI:
         self.menu.add_command(label="删除选中", command=self.delete_selected)
         self.tree.bind("<Button-3>", self.show_context_menu)
 
-        # 3. 底部进度条
         footer_frame = tk.Frame(left_card, bg="#FAFAFA", height=45)
         footer_frame.pack(fill="x", side="bottom")
         
@@ -152,15 +149,11 @@ class VideoUploaderGUI:
                                         style="Blue.Horizontal.TProgressbar")
         self.progress.pack(side="left", fill="x", expand=True, padx=5, pady=12)
         
-        # 精度显示 Label
         self.progress_label = tk.Label(footer_frame, text="0.00%", bg="#FAFAFA", fg="black", 
                                        font=("Microsoft YaHei", 9, "bold"))
         self.progress_label.pack(side="right", padx=(5, 15), pady=12)
 
-
-        # ---------------------------------------------------------
-        # 右侧卡片：参数与控制
-        # ---------------------------------------------------------
+        # 右侧
         right_card = tk.Frame(top_container, bg=COLOR_CARD_BG, width=280, 
                               highlightbackground=COLOR_BORDER_BLUE, highlightthickness=1)
         right_card.pack(side="right", fill="y")
@@ -193,7 +186,6 @@ class VideoUploaderGUI:
 
         tk.Frame(right_card, bg=COLOR_BORDER_BLUE, height=1).pack(fill="x", padx=20, pady=20)
 
-        # === 按钮区域 ===
         self.start_btn = tk.Button(right_card, text="开始处理", bg=COLOR_BTN_START, fg="white",
                                    font=("Microsoft YaHei", 12, "bold"), relief="flat",
                                    activebackground=COLOR_BTN_START_HOVER, activeforeground="white",
@@ -216,9 +208,7 @@ class VideoUploaderGUI:
         tk.Label(right_card, text="提示: 拖拽文件夹可快速添加", bg=COLOR_CARD_BG, fg="#909399", 
                  font=("Microsoft YaHei", 8)).pack(side="bottom", pady=20)
 
-        # ---------------------------------------------------------
         # 底部日志
-        # ---------------------------------------------------------
         log_container = tk.Frame(root, bg="white", height=160,
                                  highlightbackground=COLOR_BORDER_BLUE, highlightthickness=1)
         log_container.pack(side="bottom", fill="x", padx=20, pady=(0, 20))
@@ -302,23 +292,52 @@ class VideoUploaderGUI:
 
     def on_drop(self, event):
         paths = self.root.tk.splitlist(event.data)
-        new_files = []
-        for p in paths:
-            if os.path.isdir(p):
-                for fn in os.listdir(p):
-                    full = os.path.join(p, fn)
-                    if os.path.isfile(full) and fn.lower().endswith(VIDEO_EXTS):
-                        new_files.append(os.path.normpath(full))
-            else:
-                if p.lower().endswith(VIDEO_EXTS):
-                    new_files.append(os.path.normpath(p))
-        new_files.sort(key=lambda x: os.path.basename(x).lower())
-        self.files.extend(new_files)
-        self.files = list(dict.fromkeys(self.files))
-        self.refresh_table()
-        self.log(f"拖拽添加 {len(new_files)} 个文件")
+        self._add_paths_to_list(paths)
 
-    # 【修改】右键菜单 - 检测 ☁ 状态
+    def add_file(self):
+        fps = filedialog.askopenfilenames(title="选择视频", filetypes=[("视频文件", "*.mp4 *.mkv *.ts")])
+        if fps:
+            self._add_paths_to_list(fps)
+
+    def choose_dir(self):
+        d = filedialog.askdirectory(title="选择目录")
+        if not d: return
+        
+        found_files = []
+        for rootdir, _, filenames in os.walk(d):
+            for fn in filenames:
+                if fn.lower().endswith(VIDEO_EXTS):
+                    found_files.append(os.path.join(rootdir, fn))
+        
+        if found_files:
+            self._add_paths_to_list(found_files)
+
+    # 【新增】统一的文件添加处理，包含动态更新逻辑
+    def _add_paths_to_list(self, paths):
+        added_count = 0
+        added_size = 0
+        
+        with self.data_lock:
+            for p in paths:
+                p = os.path.normpath(p)
+                if os.path.isfile(p) and p.lower().endswith(VIDEO_EXTS):
+                    if p not in self.files:
+                        self.files.append(p)
+                        added_count += 1
+                        try:
+                            fsize = os.path.getsize(p)
+                            added_size += fsize
+                        except: pass
+                        
+            if added_count > 0:
+                self.total_task_bytes += added_size
+                # 如果已经在运行，添加新文件后，分母变大，进度条应立即刷新
+                if self.is_running:
+                    self._calculate_and_update_global_progress()
+                
+                self.refresh_table()
+                self.log(f"添加 {added_count} 个文件 (共 {added_size/1024/1024:.1f} MB)")
+
     def show_context_menu(self, event):
         row_id = self.tree.identify_row(event.y)
         if row_id:
@@ -331,35 +350,11 @@ class VideoUploaderGUI:
             vals = self.tree.item(row_id, "values")
             status = vals[2]
             
-            # 检测符号: ⚡=切片中, ☁=上传中, ✅=完成
             if "⚡" in status or "☁" in status or "✅" in status:
                 return
             
             self.menu.post(event.x_root, event.y_root)
 
-    def add_file(self):
-        fps = filedialog.askopenfilenames(title="选择视频", filetypes=[("视频文件", "*.mp4 *.mkv *.ts")])
-        if fps:
-            for fp in fps:
-                self.files.append(os.path.normpath(fp))
-            self.files = list(dict.fromkeys(self.files))
-            self.refresh_table()
-            self.log(f"添加 {len(fps)} 个文件")
-
-    def choose_dir(self):
-        d = filedialog.askdirectory(title="选择目录")
-        if not d: return
-        cnt = 0
-        for rootdir, _, filenames in os.walk(d):
-            for fn in filenames:
-                if fn.lower().endswith(VIDEO_EXTS):
-                    full_path = os.path.normpath(os.path.join(rootdir, fn))
-                    self.files.append(full_path)
-                    cnt += 1
-        self.refresh_table()
-        self.log(f"目录添加 {cnt} 个文件")
-
-    # 【修改】删除逻辑 - 检测 ☁ 状态
     def delete_selected(self):
         if self.is_running:
             messagebox.showwarning("警告", "任务正在进行中，禁止删除文件！")
@@ -372,22 +367,26 @@ class VideoUploaderGUI:
         to_delete_iids = []
         protected_count = 0
         
-        for iid in selected:
-            vals = self.tree.item(iid, "values")
-            status = vals[2]
-            
-            # 检测符号
-            if "⚡" in status or "☁" in status or "✅" in status:
-                protected_count += 1
-                continue
-            
-            to_delete_iids.append(iid)
+        with self.data_lock:
+            for iid in selected:
+                vals = self.tree.item(iid, "values")
+                status = vals[2]
+                path = vals[1]
+                
+                if "⚡" in status or "☁" in status or "✅" in status:
+                    protected_count += 1
+                    continue
+                
+                to_delete_iids.append(iid)
+                if path in self.files:
+                    try:
+                        fsize = os.path.getsize(path)
+                        self.total_task_bytes -= fsize
+                    except: pass
+                    self.files.remove(path)
 
-        for iid in to_delete_iids:
-            vals = self.tree.item(iid, "values")
-            if vals and vals[1] in self.files:
-                self.files.remove(vals[1])
-            self.tree.delete(iid)
+            for iid in to_delete_iids:
+                self.tree.delete(iid)
             
         if protected_count > 0:
             self.log(f"提示：已跳过 {protected_count} 个处理中/已完成的文件")
@@ -396,11 +395,18 @@ class VideoUploaderGUI:
         if self.is_running:
             messagebox.showwarning("警告", "任务正在进行中，禁止清空列表！")
             return
-        self.files = []
+        with self.data_lock:
+            self.files = []
+            self.total_task_bytes = 0
+            self.finished_file_bytes = 0
+            self.current_processing_bytes = 0
         self.refresh_table()
+        self.progress["value"] = 0
+        self.progress_label.config(text="0.00%")
         self.log("列表已清空")
 
     def refresh_table(self):
+        # 简单全量刷新 (性能优化点：如果列表很大应该用增量更新，但这里简单起见全刷)
         for item in self.tree.get_children():
             self.tree.delete(item)
         for i, fp in enumerate(self.files):
@@ -413,8 +419,9 @@ class VideoUploaderGUI:
         self.root.destroy()
 
     def start_process(self):
-        if self.is_running or not self.files:
-            if not self.files: messagebox.showwarning("提示", "请先添加文件")
+        if self.is_running: return
+        if not self.files:
+            messagebox.showwarning("提示", "请先添加文件")
             return
         try:
             seg = int(self.seg_entry.get())
@@ -426,6 +433,11 @@ class VideoUploaderGUI:
         self.is_running = True
         self.start_btn.config(state="disabled", bg="#a0cfff") 
         self.stop_btn.config(state="normal", bg=COLOR_BTN_STOP)
+        
+        # 重置进度相关变量 (如果是重新开始)
+        # 注意：如果files里有新的，total_task_bytes 已经是累加过的，不需要重算，只需重置完成量
+        self.finished_file_bytes = 0
+        self.current_processing_bytes = 0
         self.progress["value"] = 0
         self.progress_label.config(text="0.00%")
         
@@ -434,35 +446,58 @@ class VideoUploaderGUI:
     def stop_process(self):
         messagebox.showinfo("提示", "当前不支持强行中断，请等待当前文件完成")
 
+    # 全局进度计算公式
+    def _calculate_and_update_global_progress(self):
+        if self.total_task_bytes == 0:
+            val = 0
+        else:
+            total_done = self.finished_file_bytes + self.current_processing_bytes
+            val = (total_done / self.total_task_bytes) * 100
+        
+        if val > 100: val = 100
+        self.root.after(0, lambda v=val: (
+            self.progress.configure(value=v),
+            self.progress_label.config(text=f"{v:.2f}%")
+        ))
+
     def _process_thread(self, seg, thr):
-        total_size = 0
-        for fp in self.files:
-            try:
-                total_size += os.path.getsize(fp)
-            except: pass
+        processed_index = 0
         
-        if total_size == 0: total_size = 1 
-        
-        current_base_progress = 0.0
+        self.log(f"任务启动，初始总大小: {self.total_task_bytes/1024/1024:.2f} MB")
 
-        self.log(f"开始任务，总大小: {total_size/1024/1024:.2f} MB")
+        # 使用 while 循环来支持动态添加文件
+        while True:
+            current_file = None
+            
+            with self.data_lock:
+                if processed_index < len(self.files):
+                    current_file = self.files[processed_index]
+                    processed_index += 1
+                else:
+                    # 所有文件处理完毕
+                    break
+            
+            if current_file:
+                file_size = 0
+                try: file_size = os.path.getsize(current_file)
+                except: pass
 
-        for i, fp in enumerate(self.files):
-            file_size = 0
-            try: file_size = os.path.getsize(fp)
-            except: pass
-            
-            file_weight = file_size / total_size
-
-            base = os.path.splitext(os.path.basename(fp))[0]
-            self._update_status(fp, "⚡ 切片中")
-            self._focus_row(fp)
-            
-            ok = self._process_single(fp, base, seg, thr, file_weight, current_base_progress)
-            self._update_status(fp, "✅ 完成" if ok else "❌ 失败")
-            
-            current_base_progress += file_weight
-            self._update_progress_ui(current_base_progress * 100)
+                base_name = os.path.splitext(os.path.basename(current_file))[0]
+                self._update_status(current_file, "⚡ 切片中")
+                self._focus_row(current_file)
+                
+                # 开始处理单个文件
+                self.current_processing_bytes = 0 # 重置当前文件进度
+                
+                ok = self._process_single(current_file, base_name, seg, thr, file_size)
+                
+                self._update_status(current_file, "✅ 完成" if ok else "❌ 失败")
+                
+                # 累加到已完成总量
+                with self.data_lock:
+                    self.finished_file_bytes += file_size
+                    self.current_processing_bytes = 0 # 归零，因为已经加到 finished 里了
+                    self._calculate_and_update_global_progress()
 
         self.log("全部任务完成")
         
@@ -494,14 +529,7 @@ class VideoUploaderGUI:
                 self.root.after(0, lambda: self.tree.see(iid))
                 self.root.after(0, lambda: self.tree.selection_set(iid))
 
-    def _update_progress_ui(self, val):
-        if val > 100: val = 100
-        self.root.after(0, lambda v=val: (
-            self.progress.configure(value=v),
-            self.progress_label.config(text=f"{v:.2f}%")
-        ))
-
-    def _process_single(self, input_file, base, seg, thr, file_weight, base_progress):
+    def _process_single(self, input_file, base, seg, thr, file_total_size):
         video_dir = os.path.join(OUTPUT_DIR, base)
         os.makedirs(video_dir, exist_ok=True)
         
@@ -521,7 +549,6 @@ class VideoUploaderGUI:
         ts_files = sorted([f for f in os.listdir(video_dir) if f.endswith(".ts")])
         if not ts_files: return False
         
-        # 【修改】使用 ☁，并显示“已上传 0%”
         self._update_status(input_file, "☁ 已上传 0%")
         urls = {}
         
@@ -545,14 +572,16 @@ class VideoUploaderGUI:
                     
                     with lock:
                         uploaded_ts_count += 1
-                        file_progress = uploaded_ts_count / total_ts
-                        file_contribution = file_weight * file_progress
-                        total_percent = (base_progress + file_contribution) * 100
                         
-                        self._update_progress_ui(total_percent)
+                        # 计算当前文件的上传比例 (0.0 - 1.0)
+                        file_ratio = uploaded_ts_count / total_ts
                         
-                        percent_str = int(file_progress * 100)
-                        # 【修改】使用 ☁，显示“已上传 xx%”
+                        # 更新全局进度变量 (当前文件已完成的大小)
+                        with self.data_lock:
+                            self.current_processing_bytes = file_total_size * file_ratio
+                            self._calculate_and_update_global_progress()
+                        
+                        percent_str = int(file_ratio * 100)
                         self._update_status(input_file, f"☁ 已上传 {percent_str}%")
                     
                     self.log(f"上传成功 [{uploaded_ts_count}/{total_ts}]: {name}")
