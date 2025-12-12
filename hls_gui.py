@@ -4,6 +4,7 @@ import time
 import subprocess
 import threading
 import queue
+import shutil
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -28,23 +29,21 @@ AUTHCODE = "97"
 VIDEO_EXTS = (".mp4", ".mkv", ".ts")
 
 # ================= 视觉配色 =================
-COLOR_BG_MAIN = "#F2F6FC"       # 窗口大背景
-COLOR_CARD_BG = "#FFFFFF"       # 卡片背景
-COLOR_BORDER_BLUE = "#3399ff"   # 核心蓝色边框
-COLOR_BORDER_GRAY = "#DCDFE6"   # 退出按钮/普通边框
+COLOR_BG_MAIN = "#F2F6FC"
+COLOR_CARD_BG = "#FFFFFF"
+COLOR_BORDER_BLUE = "#3399ff"
+COLOR_BORDER_GRAY = "#DCDFE6"
 
-# 按钮颜色
-COLOR_BTN_START = "#409EFF"     # 现代蓝
+COLOR_BTN_START = "#409EFF"
 COLOR_BTN_START_HOVER = "#66b1ff"
-COLOR_BTN_STOP = "#F56C6C"      # 现代红
+COLOR_BTN_STOP = "#F56C6C"
 COLOR_BTN_STOP_HOVER = "#f78989"
 
-# 进度条
 COLOR_PROG_BAR = "#3399ff"
-
-# 日志
 COLOR_LOG_BG = "#1E1E1E"
 COLOR_LOG_FG = "#00FF00"
+COLOR_LOG_WARN = "#FFCC00"
+COLOR_LOG_ERR = "#FF3333"
 
 # ================= 核心逻辑 =================
 def upload_file(file_path):
@@ -86,24 +85,22 @@ class VideoUploaderGUI:
         self.log_q = queue.Queue()
         self.is_running = False
         
-        # === 动态进度核心变量 ===
-        self.data_lock = threading.Lock() # 线程锁
-        self.total_task_bytes = 0         # 所有任务总大小(字节)
-        self.finished_file_bytes = 0      # 已完成文件的总大小(字节)
-        self.current_processing_bytes = 0 # 当前正在处理的文件已上传大小(字节)
+        self.data_lock = threading.Lock()
+        self.total_task_bytes = 0
+        self.finished_file_bytes = 0
+        self.current_processing_bytes = 0
+        
+        self.failed_summary = {} 
 
-        # === 主布局容器 ===
+        # === 主布局 ===
         top_container = tk.Frame(root, bg=COLOR_BG_MAIN)
         top_container.pack(side="top", fill="both", expand=True, padx=20, pady=20)
 
-        # ---------------------------------------------------------
-        # 左侧卡片：任务列表
-        # ---------------------------------------------------------
+        # 左侧
         left_card = tk.Frame(top_container, bg=COLOR_CARD_BG, 
                              highlightbackground=COLOR_BORDER_BLUE, highlightthickness=1)
         left_card.pack(side="left", fill="both", expand=True, padx=(0, 15))
 
-        # 1. 顶部工具栏
         header_frame = tk.Frame(left_card, bg=COLOR_CARD_BG, height=50)
         header_frame.pack(fill="x", padx=15, pady=15)
 
@@ -117,13 +114,12 @@ class VideoUploaderGUI:
         self._create_outline_btn(btn_box, "📄 添加文件", self.add_file)
         self._create_outline_btn(btn_box, "📂 添加目录", self.choose_dir)
 
-        # 2. 表格区域
         table_border = tk.Frame(left_card, bg=COLOR_BORDER_BLUE, padx=1, pady=1)
         table_border.pack(fill="both", expand=True, padx=15, pady=(0, 15))
 
         columns = ("name", "path", "status")
         self.tree = ttk.Treeview(table_border, columns=columns, show="headings", 
-                                 selectmode="extended", style="Custom.Treeview")
+                                 selectmode="extended", style="Custom.Treeview", bd=0)
         
         vsb = ttk.Scrollbar(table_border, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=vsb.set)
@@ -147,7 +143,6 @@ class VideoUploaderGUI:
         self.menu.add_command(label="删除选中", command=self.delete_selected)
         self.tree.bind("<Button-3>", self.show_context_menu)
 
-        # 3. 底部进度条
         footer_frame = tk.Frame(left_card, bg="#FAFAFA", height=45)
         footer_frame.pack(fill="x", side="bottom")
         
@@ -158,15 +153,11 @@ class VideoUploaderGUI:
                                         style="Blue.Horizontal.TProgressbar")
         self.progress.pack(side="left", fill="x", expand=True, padx=5, pady=12)
         
-        # 精度显示 Label
         self.progress_label = tk.Label(footer_frame, text="0.00%", bg="#FAFAFA", fg="black", 
                                        font=("Microsoft YaHei", 9, "bold"))
         self.progress_label.pack(side="right", padx=(5, 15), pady=12)
 
-
-        # ---------------------------------------------------------
-        # 右侧卡片：参数与控制
-        # ---------------------------------------------------------
+        # 右侧
         right_card = tk.Frame(top_container, bg=COLOR_CARD_BG, width=280, 
                               highlightbackground=COLOR_BORDER_BLUE, highlightthickness=1)
         right_card.pack(side="right", fill="y")
@@ -199,7 +190,6 @@ class VideoUploaderGUI:
 
         tk.Frame(right_card, bg=COLOR_BORDER_BLUE, height=1).pack(fill="x", padx=20, pady=20)
 
-        # === 按钮区域 ===
         self.start_btn = tk.Button(right_card, text="开始处理", bg=COLOR_BTN_START, fg="white",
                                    font=("Microsoft YaHei", 12, "bold"), relief="flat",
                                    activebackground=COLOR_BTN_START_HOVER, activeforeground="white",
@@ -222,9 +212,7 @@ class VideoUploaderGUI:
         tk.Label(right_card, text="提示: 拖拽文件夹可快速添加", bg=COLOR_CARD_BG, fg="#909399", 
                  font=("Microsoft YaHei", 8)).pack(side="bottom", pady=20)
 
-        # ---------------------------------------------------------
         # 底部日志
-        # ---------------------------------------------------------
         log_container = tk.Frame(root, bg="white", height=160,
                                  highlightbackground=COLOR_BORDER_BLUE, highlightthickness=1)
         log_container.pack(side="bottom", fill="x", padx=20, pady=(0, 20))
@@ -238,6 +226,9 @@ class VideoUploaderGUI:
         self.log_text = tk.Text(log_container, bg=COLOR_LOG_BG, fg=COLOR_LOG_FG,
                                 font=("Consolas", 10), relief="flat", padx=10, pady=5, state="disabled")
         self.log_text.pack(fill="both", expand=True)
+        
+        self.log_text.tag_config("WARN", foreground=COLOR_LOG_WARN)
+        self.log_text.tag_config("ERR", foreground=COLOR_LOG_ERR)
 
         self._schedule_log_drain()
 
@@ -292,16 +283,20 @@ class VideoUploaderGUI:
         y = (screen_height - height) // 2
         self.root.geometry(f"{width}x{height}+{x}+{y}")
 
-    # ================= 业务逻辑 =================
-    def log(self, msg):
+    def log(self, msg, level="INFO"):
         t = time.strftime("[%H:%M:%S]")
-        self.log_q.put(f"{t} {msg}")
+        self.log_q.put((t, msg, level))
 
     def _schedule_log_drain(self):
         while not self.log_q.empty():
-            line = self.log_q.get()
+            t, msg, level = self.log_q.get()
             self.log_text.config(state="normal")
-            self.log_text.insert("end", line + "\n")
+            
+            tag = None
+            if level == "WARN": tag = "WARN"
+            elif level == "ERR": tag = "ERR"
+            
+            self.log_text.insert("end", f"{t} {msg}\n", tag)
             self.log_text.see("end")
             self.log_text.config(state="disabled")
         self.root.after(120, self._schedule_log_drain)
@@ -328,11 +323,10 @@ class VideoUploaderGUI:
         if found_files:
             self._add_paths_to_list(found_files)
 
-    # 【修改重点】增量添加逻辑：不使用 refresh_table，而是直接 insert 新增项
     def _add_paths_to_list(self, paths):
         added_count = 0
         added_size = 0
-        new_items = [] # 暂存新文件
+        new_items = []
 
         with self.data_lock:
             for p in paths:
@@ -352,14 +346,11 @@ class VideoUploaderGUI:
                 if self.is_running:
                     self._calculate_and_update_global_progress()
                 
-                # === 增量更新 UI ===
                 current_count = len(self.tree.get_children())
                 for i, fp in enumerate(new_items):
-                    # 计算斑马纹索引
                     idx = current_count + i
                     tag = "evenrow" if idx % 2 == 0 else "oddrow"
                     self.tree.insert("", "end", values=(os.path.basename(fp), fp, "等待中"), tags=(tag,))
-                # ==================
 
                 self.log(f"添加 {added_count} 个文件 (共 {added_size/1024/1024:.1f} MB)")
 
@@ -414,7 +405,7 @@ class VideoUploaderGUI:
                 self.tree.delete(iid)
             
         if protected_count > 0:
-            self.log(f"提示：已跳过 {protected_count} 个处理中/已完成的文件")
+            self.log(f"提示：已跳过 {protected_count} 个处理中/已完成的文件", "WARN")
 
     def clear_data(self):
         if self.is_running:
@@ -460,6 +451,7 @@ class VideoUploaderGUI:
         
         self.finished_file_bytes = 0
         self.current_processing_bytes = 0
+        self.failed_summary = {} 
         self.progress["value"] = 0
         self.progress_label.config(text="0.00%")
         
@@ -483,12 +475,10 @@ class VideoUploaderGUI:
 
     def _process_thread(self, seg, thr):
         processed_index = 0
-        
         self.log(f"任务启动，初始总大小: {self.total_task_bytes/1024/1024:.2f} MB")
 
         while True:
             current_file = None
-            
             with self.data_lock:
                 if processed_index < len(self.files):
                     current_file = self.files[processed_index]
@@ -509,21 +499,28 @@ class VideoUploaderGUI:
                 
                 ok = self._process_single(current_file, base_name, seg, thr, file_size)
                 
-                self._update_status(current_file, "✅ 完成" if ok else "❌ 失败")
+                if ok:
+                    self._update_status(current_file, "✅ 完成")
                 
                 with self.data_lock:
                     self.finished_file_bytes += file_size
                     self.current_processing_bytes = 0 
                     self._calculate_and_update_global_progress()
 
-        self.log("全部任务完成")
+        self.log("==============================")
+        self.log("全部任务队列处理完成")
         
-        try:
-             import shutil
-             if os.path.exists(OUTPUT_DIR):
-                shutil.rmtree(OUTPUT_DIR)
-             self.log("已清理切片临时目录")
-        except: pass
+        if self.failed_summary:
+            self.log(f"⚠️ 注意：有 {len(self.failed_summary)} 个视频存在分片上传失败", "WARN")
+            for fname, count in self.failed_summary.items():
+                self.log(f"   -> 视频: {fname} | 失败分片数: {count}", "ERR")
+            self.log("提示：失败的视频已保留切片目录，请检查。", "WARN")
+        else:
+            self.log("所有视频完美通过！")
+            try:
+                if os.path.exists(OUTPUT_DIR) and not os.listdir(OUTPUT_DIR):
+                    shutil.rmtree(OUTPUT_DIR)
+            except: pass
         
         self.is_running = False
         self.root.after(0, self._reset_btn)
@@ -560,7 +557,7 @@ class VideoUploaderGUI:
                 startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
             subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, startupinfo=startupinfo)
         except Exception as e:
-            self.log(f"{base} 切片失败: {e}")
+            self.log(f"{base} 切片失败: {e}", "ERR")
             return False
         
         self.log(f"{base} 切片完成")
@@ -574,9 +571,9 @@ class VideoUploaderGUI:
         
         total_ts = len(ts_files)
         uploaded_ts_count = 0
+        failed_segments = 0
         lock = threading.Lock()
 
-        # 带重试的上传逻辑
         def _u(fpath):
             fname = os.path.basename(fpath)
             max_retries = 3
@@ -585,7 +582,7 @@ class VideoUploaderGUI:
                     return upload_file(fpath)
                 except Exception as e:
                     if i < max_retries:
-                        self.log(f"⚠️ {fname} 上传失败，正在重试 ({i}/{max_retries-1})...")
+                        self.log(f"⚠️ {fname} 上传失败，正在重试 ({i}/{max_retries-1})...", "WARN")
                         time.sleep(i)
                     else:
                         raise e
@@ -610,10 +607,10 @@ class VideoUploaderGUI:
                     
                     self.log(f"{name} 上传成功")
                 except Exception as e:
-                    self.log(f"❌ {name} 最终上传失败: {e}")
+                    self.log(f"❌ {name} 最终上传失败: {e}", "ERR")
+                    with lock:
+                        failed_segments += 1
         
-        self.log(f"{base} 上传完成")
-
         lines = []
         try:
             with open(os.path.join(video_dir, f"{base}.m3u8"), "r", encoding="utf-8") as f:
@@ -623,13 +620,23 @@ class VideoUploaderGUI:
                     else: lines.append(line)
             with open(os.path.join(M3U8_DIR, f"{base}.m3u8"), "w", encoding="utf-8") as f:
                 f.writelines(lines)
-            
+        except Exception as e:
+            self.log(f"{base} 写入M3U8失败: {e}", "ERR")
+
+        # === 关键：检查是否有失败 ===
+        if failed_segments > 0:
+            self.log(f"{base} 上传完成，但有 {failed_segments} 个切片失败，保留目录。", "WARN")
+            self.failed_summary[base] = failed_segments
+            # 【修改】状态显示更明确
+            self._update_status(input_file, f"{failed_segments}个ts上传失败")
+            return False 
+        else:
+            self.log(f"{base} 上传完成，清理临时切片")
             try:
                 for f in ts_files: os.remove(os.path.join(video_dir, f))
                 os.rmdir(video_dir)
             except: pass
             return True
-        except: return False
 
 if __name__ == "__main__":
     try:
