@@ -16,6 +16,7 @@ OUTPUT_DIR = "output_slices"
 M3U8_DIR = "m3u8"
 DEFAULT_SEGMENT_SECONDS = 3
 DEFAULT_UPLOAD_THREADS = 2
+DEFAULT_MAX_RETRIES = 3  # 默认重试次数
 
 UPLOAD_URL = (
     "https://img1.freeforever.club/upload"
@@ -60,8 +61,9 @@ def upload_file(file_path):
     if ext != ".ts":
         raise ValueError("只允许上传 .ts 文件")
     with open(file_path, "rb") as f:
+        # timeout 设置为 60秒
         files = {"file": (os.path.basename(file_path), f, "video/vnd.dlna.mpeg-tts")}
-        resp = requests.post(UPLOAD_URL, headers=headers, cookies=cookies, files=files, timeout=180)
+        resp = requests.post(UPLOAD_URL, headers=headers, cookies=cookies, files=files, timeout=60)
     resp.raise_for_status()
     data = resp.json()
     src = data[0]["src"]
@@ -84,6 +86,7 @@ class VideoUploaderGUI:
         self.files = []
         self.log_q = queue.Queue()
         self.is_running = False
+        self.stop_requested = False
         
         self.data_lock = threading.Lock()
         self.total_task_bytes = 0
@@ -178,15 +181,23 @@ class VideoUploaderGUI:
             "justify": "center"
         }
 
+        # 参数1：切片间隔
         tk.Label(form_frame, text="切片间隔 (秒):", bg=COLOR_CARD_BG, fg="black", font=("Microsoft YaHei", 10)).grid(row=0, column=0, sticky="w", pady=8)
         self.seg_entry = tk.Entry(form_frame, width=8, **entry_conf)
         self.seg_entry.insert(0, str(DEFAULT_SEGMENT_SECONDS))
         self.seg_entry.grid(row=0, column=1, sticky="e", pady=8)
 
+        # 参数2：上传线程数
         tk.Label(form_frame, text="上传线程数:", bg=COLOR_CARD_BG, fg="black", font=("Microsoft YaHei", 10)).grid(row=1, column=0, sticky="w", pady=8)
         self.thr_entry = tk.Entry(form_frame, width=8, **entry_conf)
         self.thr_entry.insert(0, str(DEFAULT_UPLOAD_THREADS))
         self.thr_entry.grid(row=1, column=1, sticky="e", pady=8)
+
+        # 参数3：【新增】上传重试次数
+        tk.Label(form_frame, text="上传重试次数:", bg=COLOR_CARD_BG, fg="black", font=("Microsoft YaHei", 10)).grid(row=2, column=0, sticky="w", pady=8)
+        self.retry_entry = tk.Entry(form_frame, width=8, **entry_conf)
+        self.retry_entry.insert(0, str(DEFAULT_MAX_RETRIES))
+        self.retry_entry.grid(row=2, column=1, sticky="e", pady=8)
 
         tk.Frame(right_card, bg=COLOR_BORDER_BLUE, height=1).pack(fill="x", padx=20, pady=20)
 
@@ -202,15 +213,8 @@ class VideoUploaderGUI:
                                   state="disabled", cursor="arrow", command=self.stop_process)
         self.stop_btn.pack(fill="x", padx=20, pady=(0, 10), ipady=8)
 
-        tk.Button(right_card, text="退出程序", bg="white", fg="black",
-                  font=("Microsoft YaHei", 10), 
-                  relief="solid", bd=1,
-                  activebackground="#f2f2f2", 
-                  cursor="hand2",
-                  command=self.exit_app).pack(fill="x", padx=20, pady=(10, 10), ipady=4)
-
         tk.Label(right_card, text="提示: 拖拽文件夹可快速添加", bg=COLOR_CARD_BG, fg="#909399", 
-                 font=("Microsoft YaHei", 8)).pack(side="bottom", pady=20)
+                 font=("Microsoft YaHei", 8)).pack(side="bottom", pady=30)
 
         # 底部日志
         log_container = tk.Frame(root, bg="white", height=160,
@@ -428,11 +432,6 @@ class VideoUploaderGUI:
             tag = "evenrow" if i % 2 == 0 else "oddrow"
             self.tree.insert("", "end", values=(os.path.basename(fp), fp, "等待中"), tags=(tag,))
 
-    def exit_app(self):
-        if self.is_running:
-            if not messagebox.askyesno("警告", "任务进行中，确定退出？"): return
-        self.root.destroy()
-
     def start_process(self):
         if self.is_running: return
         if not self.files:
@@ -441,11 +440,17 @@ class VideoUploaderGUI:
         try:
             seg = int(self.seg_entry.get())
             thr = int(self.thr_entry.get())
-        except: return
+            # 【获取重试次数】
+            retries = int(self.retry_entry.get())
+            if retries <= 0: raise ValueError
+        except: 
+            messagebox.showwarning("错误", "参数必须为正整数")
+            return
 
         os.makedirs(OUTPUT_DIR, exist_ok=True)
         
         self.is_running = True
+        self.stop_requested = False
         self.start_btn.config(state="disabled", bg="#a0cfff") 
         self.stop_btn.config(state="normal", bg=COLOR_BTN_STOP)
         
@@ -455,10 +460,15 @@ class VideoUploaderGUI:
         self.progress["value"] = 0
         self.progress_label.config(text="0.00%")
         
-        threading.Thread(target=self._process_thread, args=(seg, thr), daemon=True).start()
+        # 将重试次数传给线程
+        threading.Thread(target=self._process_thread, args=(seg, thr, retries), daemon=True).start()
 
     def stop_process(self):
-        messagebox.showinfo("提示", "当前不支持强行中断，请等待当前文件完成")
+        if not self.is_running: return
+        if messagebox.askyesno("确认", "确定要停止当前任务吗？\n(正在切片的任务会等待切完，正在上传的任务会立即中断并清理)"):
+            self.stop_requested = True
+            self.stop_btn.config(state="disabled", text="停止中...")
+            self.log("用户请求停止任务...", "WARN")
 
     def _calculate_and_update_global_progress(self):
         if self.total_task_bytes == 0:
@@ -473,11 +483,14 @@ class VideoUploaderGUI:
             self.progress_label.config(text=f"{v:.2f}%")
         ))
 
-    def _process_thread(self, seg, thr):
+    def _process_thread(self, seg, thr, retries):
         processed_index = 0
         self.log(f"任务启动，初始总大小: {self.total_task_bytes/1024/1024:.2f} MB")
 
         while True:
+            if self.stop_requested:
+                break
+
             current_file = None
             with self.data_lock:
                 if processed_index < len(self.files):
@@ -497,8 +510,13 @@ class VideoUploaderGUI:
                 
                 self.current_processing_bytes = 0 
                 
-                ok = self._process_single(current_file, base_name, seg, thr, file_size)
+                # 传入 retries
+                ok = self._process_single(current_file, base_name, seg, thr, retries, file_size)
                 
+                if self.stop_requested:
+                    self._update_status(current_file, "⛔ 已停止")
+                    break
+
                 if ok:
                     self._update_status(current_file, "✅ 完成")
                 
@@ -507,27 +525,30 @@ class VideoUploaderGUI:
                     self.current_processing_bytes = 0 
                     self._calculate_and_update_global_progress()
 
-        self.log("==============================")
-        self.log("全部任务队列处理完成")
-        
-        if self.failed_summary:
-            self.log(f"⚠️ 注意：有 {len(self.failed_summary)} 个视频存在分片上传失败", "WARN")
-            for fname, count in self.failed_summary.items():
-                self.log(f"   -> 视频: {fname} | 失败分片数: {count}", "ERR")
-            self.log("提示：失败的视频已保留切片目录，请检查。", "WARN")
+        if self.stop_requested:
+            self.log("任务已强制停止！", "WARN")
         else:
-            self.log("所有视频完美通过！")
-            try:
-                if os.path.exists(OUTPUT_DIR) and not os.listdir(OUTPUT_DIR):
-                    shutil.rmtree(OUTPUT_DIR)
-            except: pass
+            self.log("==============================")
+            self.log("全部任务队列处理完成")
+            if self.failed_summary:
+                self.log(f"⚠️ 注意：有 {len(self.failed_summary)} 个视频存在分片上传失败", "WARN")
+                for fname, count in self.failed_summary.items():
+                    self.log(f"   -> 视频: {fname} | 失败分片数: {count}", "ERR")
+                self.log("提示：失败的视频已保留切片目录，请检查。", "WARN")
+            else:
+                self.log("所有视频完美通过！")
+                try:
+                    if os.path.exists(OUTPUT_DIR) and not os.listdir(OUTPUT_DIR):
+                        shutil.rmtree(OUTPUT_DIR)
+                except: pass
         
         self.is_running = False
+        self.stop_requested = False
         self.root.after(0, self._reset_btn)
 
     def _reset_btn(self):
         self.start_btn.config(state="normal", bg=COLOR_BTN_START)
-        self.stop_btn.config(state="disabled", bg="#ff9999")
+        self.stop_btn.config(state="disabled", bg="#ff9999", text="停止任务")
 
     def _update_status(self, fp, status):
         self.root.after(0, lambda: self._tree_set(fp, status))
@@ -543,7 +564,7 @@ class VideoUploaderGUI:
                 self.root.after(0, lambda: self.tree.see(iid))
                 self.root.after(0, lambda: self.tree.selection_set(iid))
 
-    def _process_single(self, input_file, base, seg, thr, file_total_size):
+    def _process_single(self, input_file, base, seg, thr, max_retries, file_total_size):
         video_dir = os.path.join(OUTPUT_DIR, base)
         os.makedirs(video_dir, exist_ok=True)
         
@@ -562,6 +583,12 @@ class VideoUploaderGUI:
         
         self.log(f"{base} 切片完成")
 
+        if self.stop_requested:
+            self.log(f"{base} 停止请求生效，正在清理切片...", "WARN")
+            try: shutil.rmtree(video_dir)
+            except: pass
+            return False
+
         ts_files = sorted([f for f in os.listdir(video_dir) if f.endswith(".ts")])
         if not ts_files: return False
         
@@ -574,15 +601,19 @@ class VideoUploaderGUI:
         failed_segments = 0
         lock = threading.Lock()
 
+        # 使用动态的 max_retries
         def _u(fpath):
             fname = os.path.basename(fpath)
-            max_retries = 3
             for i in range(1, max_retries + 1):
+                if self.stop_requested:
+                    raise Exception("Task Stopped")
+
                 try:
                     return upload_file(fpath)
                 except Exception as e:
+                    if self.stop_requested: raise Exception("Task Stopped")
                     if i < max_retries:
-                        self.log(f"⚠️ {fname} 上传失败，正在重试 ({i}/{max_retries-1})...", "WARN")
+                        self.log(f"⚠️ {fname} 上传失败，正在重试 ({i}/{max_retries})...", "WARN")
                         time.sleep(i)
                     else:
                         raise e
@@ -590,6 +621,11 @@ class VideoUploaderGUI:
         with ThreadPoolExecutor(thr) as pool:
             futs = {pool.submit(_u, os.path.join(video_dir, f)): f for f in ts_files}
             for f in as_completed(futs):
+                if self.stop_requested:
+                    for pending_f in futs:
+                        pending_f.cancel()
+                    break
+
                 name = futs[f]
                 try:
                     url = f.result()
@@ -607,10 +643,18 @@ class VideoUploaderGUI:
                     
                     self.log(f"{name} 上传成功")
                 except Exception as e:
+                    if "Task Stopped" in str(e): 
+                        break
                     self.log(f"❌ {name} 最终上传失败: {e}", "ERR")
                     with lock:
                         failed_segments += 1
         
+        if self.stop_requested:
+            self.log(f"{base} 任务已终止，正在清理残留文件...", "WARN")
+            try: shutil.rmtree(video_dir)
+            except: pass
+            return False
+
         self.log(f"{base} 上传完成")
 
         lines = []
@@ -625,7 +669,6 @@ class VideoUploaderGUI:
         except Exception as e:
             self.log(f"{base} 写入M3U8失败: {e}", "ERR")
 
-        # 【核心修复】使用 shutil.rmtree 暴力删除非空文件夹
         if failed_segments > 0:
             self.log(f"{base} 上传完成，但有 {failed_segments} 个切片失败，保留目录。", "WARN")
             self.failed_summary[base] = failed_segments
@@ -634,7 +677,6 @@ class VideoUploaderGUI:
         else:
             self.log(f"{base} 上传完成，清理临时切片目录")
             try:
-                # 无论里面有没有 .m3u8，直接连文件夹一起删
                 shutil.rmtree(video_dir)
             except Exception as e:
                 self.log(f"{base} 清理目录失败: {e}", "WARN")
