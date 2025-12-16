@@ -16,7 +16,7 @@ OUTPUT_DIR = "output_slices"
 M3U8_DIR = "m3u8"
 DEFAULT_SEGMENT_SECONDS = 3
 DEFAULT_UPLOAD_THREADS = 2
-DEFAULT_MAX_RETRIES = 3  # 默认重试次数
+DEFAULT_MAX_RETRIES = 3
 
 UPLOAD_URL = (
     "https://img1.freeforever.club/upload"
@@ -61,7 +61,6 @@ def upload_file(file_path):
     if ext != ".ts":
         raise ValueError("只允许上传 .ts 文件")
     with open(file_path, "rb") as f:
-        # timeout 设置为 60秒
         files = {"file": (os.path.basename(file_path), f, "video/vnd.dlna.mpeg-tts")}
         resp = requests.post(UPLOAD_URL, headers=headers, cookies=cookies, files=files, timeout=60)
     resp.raise_for_status()
@@ -181,19 +180,16 @@ class VideoUploaderGUI:
             "justify": "center"
         }
 
-        # 参数1：切片间隔
         tk.Label(form_frame, text="切片间隔 (秒):", bg=COLOR_CARD_BG, fg="black", font=("Microsoft YaHei", 10)).grid(row=0, column=0, sticky="w", pady=8)
         self.seg_entry = tk.Entry(form_frame, width=8, **entry_conf)
         self.seg_entry.insert(0, str(DEFAULT_SEGMENT_SECONDS))
         self.seg_entry.grid(row=0, column=1, sticky="e", pady=8)
 
-        # 参数2：上传线程数
         tk.Label(form_frame, text="上传线程数:", bg=COLOR_CARD_BG, fg="black", font=("Microsoft YaHei", 10)).grid(row=1, column=0, sticky="w", pady=8)
         self.thr_entry = tk.Entry(form_frame, width=8, **entry_conf)
         self.thr_entry.insert(0, str(DEFAULT_UPLOAD_THREADS))
         self.thr_entry.grid(row=1, column=1, sticky="e", pady=8)
 
-        # 参数3：【新增】上传重试次数
         tk.Label(form_frame, text="上传重试次数:", bg=COLOR_CARD_BG, fg="black", font=("Microsoft YaHei", 10)).grid(row=2, column=0, sticky="w", pady=8)
         self.retry_entry = tk.Entry(form_frame, width=8, **entry_conf)
         self.retry_entry.insert(0, str(DEFAULT_MAX_RETRIES))
@@ -212,6 +208,13 @@ class VideoUploaderGUI:
                                   activebackground=COLOR_BTN_STOP_HOVER, activeforeground="white",
                                   state="disabled", cursor="arrow", command=self.stop_process)
         self.stop_btn.pack(fill="x", padx=20, pady=(0, 10), ipady=8)
+
+        tk.Button(right_card, text="退出程序", bg="white", fg="black",
+                  font=("Microsoft YaHei", 10), 
+                  relief="solid", bd=1,
+                  activebackground="#f2f2f2", 
+                  cursor="hand2",
+                  command=self.exit_app).pack(fill="x", padx=20, pady=(10, 10), ipady=4)
 
         tk.Label(right_card, text="提示: 拖拽文件夹可快速添加", bg=COLOR_CARD_BG, fg="#909399", 
                  font=("Microsoft YaHei", 8)).pack(side="bottom", pady=30)
@@ -440,7 +443,6 @@ class VideoUploaderGUI:
         try:
             seg = int(self.seg_entry.get())
             thr = int(self.thr_entry.get())
-            # 【获取重试次数】
             retries = int(self.retry_entry.get())
             if retries <= 0: raise ValueError
         except: 
@@ -460,7 +462,6 @@ class VideoUploaderGUI:
         self.progress["value"] = 0
         self.progress_label.config(text="0.00%")
         
-        # 将重试次数传给线程
         threading.Thread(target=self._process_thread, args=(seg, thr, retries), daemon=True).start()
 
     def stop_process(self):
@@ -510,7 +511,6 @@ class VideoUploaderGUI:
                 
                 self.current_processing_bytes = 0 
                 
-                # 传入 retries
                 ok = self._process_single(current_file, base_name, seg, thr, retries, file_size)
                 
                 if self.stop_requested:
@@ -589,7 +589,10 @@ class VideoUploaderGUI:
             except: pass
             return False
 
-        ts_files = sorted([f for f in os.listdir(video_dir) if f.endswith(".ts")])
+        # 【核心修复】按数字顺序排序文件名 (避免 1, 10, 100, 2 这种乱序)
+        ts_files = sorted([f for f in os.listdir(video_dir) if f.endswith(".ts")], 
+                          key=lambda x: int(os.path.splitext(x)[0]))
+        
         if not ts_files: return False
         
         self.log(f"{base} 开始上传")
@@ -601,7 +604,6 @@ class VideoUploaderGUI:
         failed_segments = 0
         lock = threading.Lock()
 
-        # 使用动态的 max_retries
         def _u(fpath):
             fname = os.path.basename(fpath)
             for i in range(1, max_retries + 1):
