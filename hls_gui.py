@@ -78,6 +78,9 @@ class VideoUploaderGUI:
         self.center_window(1000, 720)
         self.root.title("批量视频切片上传工具 Pro")
         self.root.configure(bg=COLOR_BG_MAIN)
+        
+        # 【修复】绑定窗口关闭事件(点X时触发exit_app)
+        self.root.protocol("WM_DELETE_WINDOW", self.exit_app)
 
         ensure_m3u8_dir()
         self._setup_styles()
@@ -180,6 +183,7 @@ class VideoUploaderGUI:
             "justify": "center"
         }
 
+        # 参数设置
         tk.Label(form_frame, text="切片间隔 (秒):", bg=COLOR_CARD_BG, fg="black", font=("Microsoft YaHei", 10)).grid(row=0, column=0, sticky="w", pady=8)
         self.seg_entry = tk.Entry(form_frame, width=8, **entry_conf)
         self.seg_entry.insert(0, str(DEFAULT_SEGMENT_SECONDS))
@@ -209,12 +213,7 @@ class VideoUploaderGUI:
                                   state="disabled", cursor="arrow", command=self.stop_process)
         self.stop_btn.pack(fill="x", padx=20, pady=(0, 10), ipady=8)
 
-        tk.Button(right_card, text="退出程序", bg="white", fg="black",
-                  font=("Microsoft YaHei", 10), 
-                  relief="solid", bd=1,
-                  activebackground="#f2f2f2", 
-                  cursor="hand2",
-                  command=self.exit_app).pack(fill="x", padx=20, pady=(10, 10), ipady=4)
+        # 【修复】彻底移除了"退出程序"按钮的 UI 代码
 
         tk.Label(right_card, text="提示: 拖拽文件夹可快速添加", bg=COLOR_CARD_BG, fg="#909399", 
                  font=("Microsoft YaHei", 8)).pack(side="bottom", pady=30)
@@ -435,6 +434,12 @@ class VideoUploaderGUI:
             tag = "evenrow" if i % 2 == 0 else "oddrow"
             self.tree.insert("", "end", values=(os.path.basename(fp), fp, "等待中"), tags=(tag,))
 
+    # 【重要】确保这个方法在类中定义
+    def exit_app(self):
+        if self.is_running:
+            if not messagebox.askyesno("警告", "任务进行中，确定退出？"): return
+        self.root.destroy()
+
     def start_process(self):
         if self.is_running: return
         if not self.files:
@@ -589,7 +594,6 @@ class VideoUploaderGUI:
             except: pass
             return False
 
-        # 【核心修复】按数字顺序排序文件名 (避免 1, 10, 100, 2 这种乱序)
         ts_files = sorted([f for f in os.listdir(video_dir) if f.endswith(".ts")], 
                           key=lambda x: int(os.path.splitext(x)[0]))
         
