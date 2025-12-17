@@ -79,7 +79,6 @@ class VideoUploaderGUI:
         self.root.title("批量视频切片上传工具 Pro")
         self.root.configure(bg=COLOR_BG_MAIN)
         
-        # 【修复】绑定窗口关闭事件(点X时触发exit_app)
         self.root.protocol("WM_DELETE_WINDOW", self.exit_app)
 
         ensure_m3u8_dir()
@@ -183,7 +182,6 @@ class VideoUploaderGUI:
             "justify": "center"
         }
 
-        # 参数设置
         tk.Label(form_frame, text="切片间隔 (秒):", bg=COLOR_CARD_BG, fg="black", font=("Microsoft YaHei", 10)).grid(row=0, column=0, sticky="w", pady=8)
         self.seg_entry = tk.Entry(form_frame, width=8, **entry_conf)
         self.seg_entry.insert(0, str(DEFAULT_SEGMENT_SECONDS))
@@ -212,8 +210,6 @@ class VideoUploaderGUI:
                                   activebackground=COLOR_BTN_STOP_HOVER, activeforeground="white",
                                   state="disabled", cursor="arrow", command=self.stop_process)
         self.stop_btn.pack(fill="x", padx=20, pady=(0, 10), ipady=8)
-
-        # 【修复】彻底移除了"退出程序"按钮的 UI 代码
 
         tk.Label(right_card, text="提示: 拖拽文件夹可快速添加", bg=COLOR_CARD_BG, fg="#909399", 
                  font=("Microsoft YaHei", 8)).pack(side="bottom", pady=30)
@@ -434,7 +430,6 @@ class VideoUploaderGUI:
             tag = "evenrow" if i % 2 == 0 else "oddrow"
             self.tree.insert("", "end", values=(os.path.basename(fp), fp, "等待中"), tags=(tag,))
 
-    # 【重要】确保这个方法在类中定义
     def exit_app(self):
         if self.is_running:
             if not messagebox.askyesno("警告", "任务进行中，确定退出？"): return
@@ -675,8 +670,21 @@ class VideoUploaderGUI:
         except Exception as e:
             self.log(f"{base} 写入M3U8失败: {e}", "ERR")
 
+        # 【核心修复】部分失败时，只删除成功的 ts 文件，保留失败的 ts 和 m3u8
         if failed_segments > 0:
-            self.log(f"{base} 上传完成，但有 {failed_segments} 个切片失败，保留目录。", "WARN")
+            self.log(f"{base} 上传完成，但有 {failed_segments} 个切片失败。", "WARN")
+            
+            deleted_success_count = 0
+            for ts_name in urls.keys(): # urls里是成功的
+                ts_full_path = os.path.join(video_dir, ts_name)
+                try:
+                    if os.path.exists(ts_full_path):
+                        os.remove(ts_full_path)
+                        deleted_success_count += 1
+                except: pass
+            
+            self.log(f"{base} 已清理 {deleted_success_count} 个成功切片，保留失败切片。", "WARN")
+
             self.failed_summary[base] = failed_segments
             self._update_status(input_file, f"{failed_segments}个ts上传失败")
             return False 
